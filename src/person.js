@@ -43,6 +43,12 @@ function faceTexture(mood, blush, makeup = null) {
   const g = c.getContext('2d');
   const EY = 132, LX = 92, RX = 164;
 
+  // 극도로 화나면 얼굴이 벌겋게 달아오른다
+  if (mood === 'fury') {
+    g.fillStyle = 'rgba(225,40,40,0.32)';
+    g.fillRect(0, 0, 256, 256);
+  }
+
   if (blush > 0) {
     g.fillStyle = `rgba(255,105,120,${[0, 0.35, 0.6, 0.85][blush]})`;
     for (const x of [64, 192]) {
@@ -86,6 +92,8 @@ function faceTexture(mood, blush, makeup = null) {
     // in: 코 쪽 끝, out: 바깥쪽 끝의 높이
     let inY = 102, outY = 102 + droop, mid = 96;
     if (mood === 'angry') (inY = 108), (outY = 92), (mid = 100);
+    else if (mood === 'fury') (inY = 112), (outY = 86), (mid = 102);
+    else if (mood === 'annoyed') x === RX ? ((inY = 94), (outY = 92), (mid = 88)) : ((inY = 104), (outY = 101), (mid = 100));
     else if (mood === 'sad') (inY = 92), (outY = 104), (mid = 98);
     else if (mood === 'pout') (inY = 104), (outY = 98), (mid = 100);
     else if (mood === 'serious') (inY = 103), (outY = 100), (mid = 101);
@@ -109,8 +117,11 @@ function faceTexture(mood, blush, makeup = null) {
     g.arc(x + hx, EY - 6, 4, 0, Math.PI * 2);
     g.fill();
   };
-  if (mood === 'idle' || mood === 'talk' || mood === 'chew') {
+  if (mood === 'idle' || mood === 'talk' || mood === 'chew' || mood === 'annoyed') {
     for (const x of [LX, RX]) roundEye(x, 11, 15, 4);
+  } else if (mood === 'fury') {
+    // 작게 오그라든 눈동자
+    for (const x of [LX, RX]) roundEye(x, 6, 8, 2);
   } else if (mood === 'angry') {
     for (const x of [LX, RX]) roundEye(x, 9, 12, 3);
   } else if (mood === 'sad') {
@@ -152,7 +163,7 @@ function faceTexture(mood, blush, makeup = null) {
 
   // 진한 아이라인과 속눈썹
   if (madam) {
-    const openMood = ['idle', 'talk', 'chew', 'angry', 'sad', 'pout', 'serious'].includes(mood);
+    const openMood = ['idle', 'talk', 'chew', 'angry', 'sad', 'pout', 'serious', 'annoyed', 'fury'].includes(mood);
     g.strokeStyle = '#120808';
     for (const [x, s] of [[LX, -1], [RX, 1]]) {
       const open = openMood || (mood === 'wink' && x === LX);
@@ -204,6 +215,44 @@ function faceTexture(mood, blush, makeup = null) {
     g.beginPath();
     g.ellipse(128, MY + (mood === 'happy' ? 4 : 5), 7, 4, 0, 0, Math.PI * 2);
     g.fill();
+  } else if (mood === 'annoyed') {
+    // 억지 미소와 식은땀
+    g.beginPath();
+    g.moveTo(112, MY - 4);
+    g.quadraticCurveTo(128, MY + 2, 144, MY - 6);
+    g.stroke();
+    g.fillStyle = 'rgba(140,200,255,0.9)';
+    g.beginPath();
+    g.moveTo(198, 96);
+    g.quadraticCurveTo(190, 112, 198, 118);
+    g.quadraticCurveTo(206, 112, 198, 96);
+    g.fill();
+  } else if (mood === 'fury') {
+    // 이를 꽉 문 입
+    g.fillStyle = '#fff';
+    g.strokeStyle = '#3a2620';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.roundRect(108, MY - 12, 40, 20, 6);
+    g.fill();
+    g.stroke();
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(108, MY - 2);
+    g.lineTo(148, MY - 2);
+    for (const x of [118, 128, 138]) {
+      g.moveTo(x, MY - 12);
+      g.lineTo(x, MY + 8);
+    }
+    g.stroke();
+    // 이마의 핏대
+    g.strokeStyle = '#e0102a';
+    g.lineWidth = 5;
+    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      g.beginPath();
+      g.arc(190 + a * 12, 70 + b * 12, 9, a < 0 ? 0 : Math.PI, a < 0 ? Math.PI / 2 : Math.PI * 1.5, b > 0 === a < 0);
+      g.stroke();
+    }
   } else if (mood === 'angry') {
     // 소리 지르는 입
     g.fillStyle = '#7a1f2a';
@@ -658,7 +707,7 @@ export class Person {
   }
 
   do(type, dur) {
-    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
+    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
     this.action = { type, t: 0, dur: dur || D[type] || 1.5, fired: false };
   }
 
@@ -925,7 +974,31 @@ export class Person {
         const open = w > 0.3;
         this.openHand.visible = open;
         this.armR.palm.visible = !open;
-        mood = 'serious';
+        mood = this.faceMood === 'fury' ? 'fury' : 'serious';
+      } else if (a.type === 'warn') {
+        // 손을 들어 상대 쪽으로 좌우로 흔든다. 그러지 마세요
+        const w = inOut(0, 0.15, 0.85, 1);
+        tgt.srx = mix(tgt.srx, -1.15, w);
+        tgt.elR = mix(tgt.elR, -1.45, w);
+        tgt.srz = mix(tgt.srz, -0.1 + Math.sin(this.t * 11) * 0.35, w);
+        tgt.nx = mix(tgt.nx, 0.06, w);
+        tgt.ny = Math.sin(this.t * 5.5) * 0.12 * w;
+      } else if (a.type === 'rage') {
+        // 주먹 쥐고 부들부들
+        const w = inOut(0, 0.1, 0.9, 1);
+        const shake = Math.sin(this.t * 38);
+        tgt.slz = mix(tgt.slz, 0.4, w);
+        tgt.srz = mix(tgt.srz, -0.4, w);
+        tgt.slx = mix(tgt.slx, -0.35 + shake * 0.08, w);
+        tgt.srx = mix(tgt.srx, -0.35 - shake * 0.08, w);
+        tgt.elL = mix(tgt.elL, -1.3, w);
+        tgt.elR = mix(tgt.elR, -1.3, w);
+        tgt.roll = shake * 0.035 * w;
+        tgt.nx = mix(tgt.nx, 0.18, w);
+        tgt.kl = tgt.kr = mix(tgt.kl, 0.2, w);
+        tgt.hl = tgt.hr = mix(tgt.hl, -0.1, w);
+        tgt.bob += Math.abs(shake) * 0.006 * w;
+        mood = 'fury';
       } else if (a.type === 'wink') {
         // 볼 옆에 손을 대고 고개를 갸웃하며 찡긋
         const w = inOut(0, 0.15, 0.8, 1);
