@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>풍속의 밤</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+<style>
+  :root { --warm: #ffc98a; --ink: #fff4e6; --glass: rgba(18, 24, 18, 0.62); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #070b08; overflow: hidden; font-family: "Gowun Dodum", system-ui, sans-serif; color: var(--ink); }
+  #app { position: fixed; inset: 0; }
+  #app canvas { display: block; touch-action: none; }
+  button { font-family: inherit; color: inherit; cursor: pointer; }
+
+  .pill { background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 220, 170, 0.14); border-radius: 999px; }
+  #top { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; pointer-events: none; }
+  #top > * { pointer-events: auto; }
+  #brand { display: flex; flex-direction: column; gap: 6px; }
+  #title { padding: 8px 14px; display: flex; align-items: center; gap: 10px; }
+  #title b { font-family: "Nanum Pen Script", cursive; font-size: 26px; font-weight: 400; color: var(--warm); line-height: 1; }
+  #count { font-size: 12px; opacity: 0.8; }
+  #meterWrap { padding: 7px 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; width: fit-content; }
+  #meter { width: 90px; height: 7px; border-radius: 9px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+  #meterFill { height: 100%; width: 0; background: linear-gradient(90deg, #ffd29a, #ff8a8a); border-radius: 9px; transition: width 0.5s; }
+  #meterNum { opacity: 0.75; min-width: 26px; }
+  #bossWrap { padding: 7px 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; width: fit-content; }
+  #bossBar { width: 70px; height: 7px; border-radius: 9px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+  #bossFill { height: 100%; width: 100%; background: linear-gradient(90deg, #9ed38a, #ffd29a); border-radius: 9px; transition: width 0.5s; }
+  #bossFill.low { background: linear-gradient(90deg, #ff6b6b, #ff9a7a); }
+  #bossState { opacity: 0.8; min-width: 36px; }
+  #tools { display: flex; gap: 8px; }
+  .icon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid rgba(255, 220, 170, 0.14); }
+  .icon svg { width: 18px; height: 18px; }
+  #bSound .x { display: none; }
+  #bSound.off .x { display: block; }
+  #bSound.off .w { display: none; }
+
+  #actions { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 4px; padding: 6px; border-radius: 22px; }
+  #actions button { background: none; border: 0; padding: 8px 10px 6px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; min-width: 56px; transition: background 0.15s, transform 0.1s; }
+  #actions button:hover { background: rgba(255, 210, 150, 0.12); }
+  #actions button:active { transform: scale(0.94); }
+  #actions svg { width: 24px; height: 24px; stroke: var(--warm); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+  #toast { position: fixed; top: 70px; left: 50%; transform: translate(-50%, -8px); padding: 9px 16px; font-size: 13px; opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .bubble, .tag { position: absolute; left: 0; top: 0; will-change: transform; }
+  .bubble { background: #fff8ee; color: #3a2a20; font-size: 13px; padding: 6px 11px; border-radius: 14px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); opacity: 0; transition: opacity 0.2s; margin-top: -8px; }
+  .bubble::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-bottom: 0; border-top-color: #fff8ee; }
+  .bubble.show { opacity: 1; }
+  .heart { position: absolute; color: #ff5c93; font-size: 18px; pointer-events: none; text-shadow: 0 0 8px rgba(255, 90, 150, 0.7); opacity: 0; animation: heartUp 1.4s ease-out forwards; }
+  @keyframes heartUp { 0% { opacity: 0; transform: translate(-50%, 0) scale(0.6); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), -60px) scale(1.2); } }
+  .tag.staffTag { background: #ff8fb1; color: #4a0f22; }
+  .bubble.big { font-size: 19px; font-weight: 700; padding: 8px 15px; background: #ffd29a; color: #4a2414; }
+  .bubble.big::after { border-top-color: #ffd29a; }
+  .tag { background: var(--warm); color: #3a2414; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 9px; margin-top: -6px; }
+
+  .sheet { z-index: 8; position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 12px); padding: 14px; border-radius: 20px; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; width: min(340px, calc(100vw - 24px)); }
+  .sheet.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+  .sheet h3 { margin: 0 0 10px; font-size: 14px; font-weight: 400; display: flex; justify-content: space-between; align-items: center; }
+  .sheet .close { background: none; border: 0; font-size: 18px; opacity: 0.6; padding: 0 4px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid button { background: rgba(255, 220, 170, 0.08); border: 1px solid rgba(255, 220, 170, 0.16); border-radius: 14px; padding: 12px 8px; font-size: 14px; }
+  .grid button small { display: block; opacity: 0.6; font-size: 11px; margin-top: 3px; }
+  .grid button:hover { background: rgba(255, 220, 170, 0.16); }
+  #chat { position: fixed; left: 12px; bottom: max(14px, env(safe-area-inset-bottom)); width: 300px; border-radius: 16px; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+  #chatHead { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  #chatTabs { display: flex; gap: 4px; }
+  #chatTabs button { position: relative; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 220, 170, 0.14); border-radius: 999px; padding: 3px 10px; font-size: 12px; opacity: 0.7; }
+  #chatTabs button.on { background: rgba(255, 201, 138, 0.2); border-color: var(--warm); opacity: 1; }
+  #chatTabs button.new::after { content: ""; position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: #ff6b6b; }
+  #chatLines .empty { opacity: 0.5; font-size: 12px; }
+  #chatFold { background: none; border: 0; font-size: 16px; line-height: 1; padding: 0 4px; opacity: 0.8; }
+  #chatLines { height: 150px; overflow-y: auto; font-size: 13px; line-height: 1.45; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; }
+  #chatLines .line { word-break: keep-all; overflow-wrap: anywhere; animation: lineIn 0.25s ease-out; }
+  #chatLines .who { font-weight: 700; margin-right: 6px; color: #e8dccb; }
+  #chatLines .me .who { color: var(--warm); }
+  #chatLines .boss .who { color: #9ed38a; }
+  #chatLines .pungsun .who { color: #ff8fb1; }
+  #chatLines .big { font-weight: 700; }
+  @keyframes lineIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  #chat.fold #chatLines, #chat.fold #chatForm { display: none; }
+  #chatForm { display: flex; gap: 8px; }
+  #chatInput { flex: 1; min-width: 0; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 220, 170, 0.2); border-radius: 12px; padding: 8px 10px; color: var(--ink); font: inherit; font-size: 16px; outline: none; }
+  #chatInput:focus { border-color: var(--warm); }
+  #chatForm button[type=submit] { background: var(--warm); color: #3a2414; border: 0; border-radius: 12px; padding: 0 14px; font-size: 14px; }
+
+  #intro { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(10, 16, 11, 0.55), rgba(5, 8, 6, 0.92)); transition: opacity 0.6s; z-index: 10; padding: 20px; }
+  #intro.hide { opacity: 0; pointer-events: none; }
+  #intro .card { text-align: center; max-width: 340px; }
+  #intro h1 { font-family: "Nanum Pen Script", cursive; font-weight: 400; font-size: 64px; margin: 0; color: var(--warm); text-shadow: 0 0 24px rgba(255, 160, 90, 0.55); }
+  #intro p { margin: 6px 0 0; opacity: 0.82; line-height: 1.6; font-size: 14px; }
+  #intro ul { list-style: none; padding: 0; margin: 18px 0 22px; font-size: 13px; opacity: 0.75; line-height: 1.9; }
+  #enter { background: var(--warm); color: #3a2414; border: 0; border-radius: 999px; padding: 12px 34px; font-size: 16px; box-shadow: 0 0 30px rgba(255, 170, 100, 0.35); }
+
+  /* 좁은 화면에서는 수다방을 동작 버튼 위로 올린다 */
+  @media (max-width: 1100px) {
+    #chat { left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 78px); width: min(420px, calc(100vw - 24px)); }
+    #chatLines { height: 96px; }
+  }
+  @media (max-width: 480px) {
+    #actions button { min-width: 46px; padding: 7px 4px 5px; font-size: 11px; }
+    #actions svg { width: 22px; height: 22px; }
+    #title b { font-size: 22px; }
+    #toast { top: 150px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="labels"></div>
+
+<div id="top">
+  <div id="brand">
+    <div id="title" class="pill"><b>풍속의 밤</b><span id="count"></span></div>
+    <div id="meterWrap" class="pill"><span>취기</span><div id="meter"><div id="meterFill"></div></div><span id="meterNum"></span></div>
+    <div id="bossWrap" class="pill"><span>사장님 기분</span><div id="bossBar"><div id="bossFill"></div></div><span id="bossState"></span></div>
+  </div>
+  <div id="tools">
+    <button id="bCam" class="pill icon" aria-label="시점 되돌리기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg></button>
+    <button id="bSound" class="pill icon" aria-label="소리"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="x" d="M17 9l5 6M22 9l-5 6"/></svg></button>
+  </div>
+</div>
+
+<div id="toast" class="pill"></div>
+
+<div id="actions" class="pill">
+  <button id="bCheers"><svg viewBox="0 0 24 24"><path d="M5 4h5l-.6 7a2 2 0 0 1-3.8 0z"/><path d="M14 4h5l-.6 7a2 2 0 0 1-3.8 0z"/><path d="M7.5 13v6M5.5 20h4M16.5 13v6M14.5 20h4"/></svg>건배</button>
+  <button id="bShot"><svg viewBox="0 0 24 24"><path d="M7 5h10l-1.5 14h-7z"/><path d="M8 10h8"/></svg>원샷</button>
+  <button id="bAnju"><svg viewBox="0 0 24 24"><path d="M4 14h16a8 8 0 0 1-16 0z"/><path d="M14 3l-4 9M18 4l-6 8"/></svg>안주</button>
+  <button id="bTalk"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 4v-4H6a2 2 0 0 1-2-2z"/><path d="M8.5 10h.01M12 10h.01M15.5 10h.01"/></svg>수다</button>
+  <button id="bJinsang"><svg viewBox="0 0 24 24"><path d="M9 3.5c0 3 -2 5.5 -5.5 5.5M15 3.5c0 3 2 5.5 5.5 5.5M9 20.5c0 -3 -2 -5.5 -5.5 -5.5M15 20.5c0 -3 2 -5.5 5.5 -5.5"/></svg>진상</button>
+  <button id="bOrder"><svg viewBox="0 0 24 24"><path d="M4 17h16"/><path d="M5 17a7 7 0 0 1 14 0"/><path d="M12 7V5M10 5h4"/></svg>주문</button>
+</div>
+
+<div id="menu" class="sheet pill">
+  <h3>무엇을 주문할까요?<button class="close" id="menuClose" aria-label="닫기">×</button></h3>
+  <div class="grid">
+    <button data-kind="jeon" data-name="감자전">감자전<small>치즈 듬뿍</small></button>
+    <button data-kind="jeongol" data-name="전골">전골<small>보글보글</small></button>
+    <button data-kind="chicken" data-name="순살치킨">순살치킨<small>매콤하게</small></button>
+    <button data-kind="shrimp" data-name="새우튀김">새우튀김<small>마요 소스</small></button>
+  </div>
+</div>
+
+<div id="chat" class="pill">
+  <div id="chatHead"><div id="chatTabs"><button type="button" data-room="all" class="on">전체</button><button type="button" data-room="table" hidden>우리 테이블</button></div><button id="chatFold" type="button" aria-label="접기">−</button></div>
+  <div id="chatLines"></div>
+  <form id="chatForm"><input id="chatInput" maxlength="40" placeholder="한마디 입력" autocomplete="off" enterkeyhint="send"><button type="submit">보내기</button></form>
+</div>
+
+<div id="intro">
+  <div class="card">
+    <h1>풍속의 밤</h1>
+    <p>숲속 같은 주점에 오신 걸 환영해요.<br>빈자리에 앉아 다른 손님과 한 잔 해요.</p>
+    <ul>
+      <li>빈 의자를 누르면 앉아요</li>
+      <li>바닥을 누르면 걸어가요</li>
+      <li>끌어서 돌리고, 두 손가락으로 확대해요</li>
+      <li>사장님을 너무 괴롭히면 삐져요</li>
+    </ul>
+    <button id="enter">입장하기</button>
+  </div>
+</div>
+
+<script>/*BUNDLE*/</script>
+</body>
+</html>
