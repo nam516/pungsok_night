@@ -12,6 +12,11 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: #070b08; overflow: hidden; font-family: "Gowun Dodum", system-ui, sans-serif; color: var(--ink); }
+  /* 휴대폰에서 두 번 눌러 확대, 당겨서 새로고침, 길게 눌러 글자 선택이 되지 않게 */
+  html, body { touch-action: manipulation; overscroll-behavior: none; -webkit-text-size-adjust: 100%; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input, textarea { -webkit-user-select: text; user-select: text; }
+  /* 16px 보다 작은 입력칸은 아이폰이 눌렀을 때 화면을 확대해 버린다 */
+  input, textarea { font-size: 16px !important; }
   #app { position: fixed; inset: 0; }
   #app canvas { display: block; touch-action: none; }
   button { font-family: inherit; color: inherit; cursor: pointer; }
@@ -115,6 +120,22 @@
   #turnClap { background: #ff8fb1 !important; }
   #nausea { position: fixed; left: 50%; top: 120px; transform: translateX(-50%); background: rgba(90, 120, 40, 0.9); color: #f4ffe0; padding: 10px 16px; border-radius: 999px; font-size: 14px; z-index: 9; animation: woozy 0.8s ease-in-out infinite alternate; white-space: nowrap; }
   @keyframes woozy { from { transform: translateX(-50%) rotate(-2deg); } to { transform: translateX(-50%) rotate(2deg); } }
+  /* 테니스장 */
+  #tn { display: none; }
+  body.tennis #tn { display: block; }
+  body.tennis #top, body.tennis #actions, body.tennis #chat, body.tennis #labels, body.tennis #toast, body.tennis #turn, body.tennis #nausea { display: none !important; }
+  #tnTop { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); padding: 8px 10px 8px 16px; display: flex; gap: 12px; align-items: center; white-space: nowrap; }
+  #tnScore { font-size: 17px; color: var(--warm); }
+  #tnLeave { background: rgba(255, 255, 255, 0.1); border: 0; border-radius: 999px; padding: 5px 12px; font-size: 13px; }
+  #tnMsg { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 7px 14px; font-size: 14px; max-width: calc(100vw - 24px); text-align: center; }
+  #tnMsg:empty { display: none; }
+  #tnHint { position: fixed; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 104px); left: 0; right: 0; text-align: center; font-size: 13px; opacity: 0.85; text-shadow: 0 1px 4px #000; }
+  #tnSwing { position: fixed; bottom: max(18px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: 150px; height: 74px; border-radius: 999px; border: 0; background: var(--warm); color: #3a2414; font-size: 24px; font-weight: 700; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); touch-action: manipulation; }
+  #tnSwing:active { transform: translateX(-50%) scale(0.94); }
+  #tnOver { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px; border-radius: 20px; width: min(320px, calc(100vw - 24px)); text-align: center; }
+  #tnOver b { display: block; font-size: 18px; color: var(--warm); margin-bottom: 12px; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.4s; z-index: 30; }
+  #fade.on { opacity: 1; }
   #banned { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(5, 8, 6, 0.9); text-align: center; padding: 20px; }
   #banned b { font-size: 22px; color: var(--warm); }
   #banned p { opacity: 0.8; font-size: 14px; }
@@ -167,7 +188,9 @@
   @media (max-height: 600px) {
     #chatLines { height: 56px; }
   }
+  .sheet { max-height: calc(100dvh - 140px); }
   @media (max-width: 480px) {
+    #chatLines { height: 64px; }
     #actions { gap: 0; padding: 4px; }
     #actions button { min-width: 42px; padding: 6px 3px 4px; font-size: 10.5px; }
     #actions svg { width: 21px; height: 21px; }
@@ -213,6 +236,7 @@
     <button data-kind="jeongol" data-name="전골">전골<small>보글보글</small></button>
     <button data-kind="chicken" data-name="순살치킨">순살치킨<small>매콤하게</small></button>
     <button data-kind="shrimp" data-name="새우튀김">새우튀김<small>마요 소스</small></button>
+    <button data-kind="refill" data-name="오뎅 리필">오뎅 리필<small>무료, 너무 자주는 눈치</small></button>
   </div>
   <button id="bBill" class="wide">계산서 보기</button>
 </div>
@@ -247,9 +271,42 @@
 
 <div id="nausea" hidden>속이 안 좋아요! <b id="nauseaSec"></b>초 안에 <b>화장실</b>로!</div>
 
+<div id="kickSheet" class="sheet pill">
+  <h3>사장님이 나가래요! <span id="kickCount"></span></h3>
+  <div class="grid grid3">
+    <button data-kick="retort">말대꾸하고 나가기<small>아 왜요!</small></button>
+    <button data-kick="hold">버티기<small id="holdSub">안 나가요!!</small></button>
+    <button data-kick="fight">너가 뭔데?<small>사장님 마구 패기</small></button>
+  </div>
+  <div class="hint" id="kickHint">안 고르면 말대꾸하고 나가요</div>
+</div>
+<div id="jinSheet" class="sheet pill">
+  <h3>어떻게 진상 부릴까요?<button class="close" id="jinClose" aria-label="닫기">×</button></h3>
+  <div class="grid grid3">
+    <button data-jin="rant">난동 부리기<small>사장 나와!!</small></button>
+    <button data-jin="slap">알바생 때리기<small>풍순이 철썩</small></button>
+    <button data-jin="beat">사장님 패기<small>바 넘어가서 한판</small></button>
+  </div>
+  <div class="hint">진상이 쌓이면 사장님이 나와서 내보내요</div>
+</div>
+
+<div id="tn">
+  <div id="tnTop" class="pill"><b id="tnScore"></b><button id="tnLeave" type="button">나가기</button></div>
+  <div id="tnMsg" class="pill"></div>
+  <div id="tnHint"></div>
+  <button id="tnSwing" type="button">스윙!</button>
+  <div id="tnOver" class="pill" hidden>
+    <b id="tnOverTitle"></b>
+    <div class="grid"><button id="tnAgain" type="button">한 판 더</button><button id="tnBack" type="button">가게로 돌아가기</button></div>
+  </div>
+</div>
+<div id="fade"></div>
+
 <div id="menuSheet" class="sheet pill">
   <h3>메뉴<button class="close" id="mainMenuClose" aria-label="닫기">×</button></h3>
   <div class="menuList">
+    <button id="menuTennis">테니스장 가기</button>
+    <button id="menuEomuk">어묵탕 떠 먹기</button>
     <button id="menuLook">캐릭터 꾸미기</button>
     <button id="menuStats">오늘의 기록과 칭호</button>
     <button id="menuRoom">방 관리</button>

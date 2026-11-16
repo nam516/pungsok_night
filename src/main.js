@@ -16,6 +16,7 @@ import { createNet } from './net.js';
 import { LOOK_OPTS, lookFromIdx, encodeLook, decodeLook, defaultLookIdx } from './looks.js';
 import { STAT_LABELS, emptyStats, soloTitle, roomTitles, packStats, unpackStats } from './titles.js';
 import { GAMES, createGames } from './games.js';
+import { createTennis } from './tennis.js';
 
 const $ = (s) => document.querySelector(s);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -45,6 +46,9 @@ controls.minDistance = 6;
 controls.maxDistance = 22;
 controls.minPolarAngle = 0.35;
 controls.maxPolarAngle = 1.15;
+// 옆으로는 50도까지만 돌린다. 더 돌리면 잎 벽 뒤에서 들여다보게 되어 아무것도 안 보인다
+controls.minAzimuthAngle = -0.9;
+controls.maxAzimuthAngle = 0.9;
 controls.update();
 
 const composer = new EffectComposer(renderer);
@@ -157,13 +161,14 @@ me.root.position.set(0, 0, 6.2);
 me.yaw = me.targetYaw = Math.PI;
 
 // 점원 둘. 바 안의 사장님, 서빙하는 직원
-const bartender = addPerson({ hair: 0x1c1512, style: 'short', shirt: 0xf1ede4, pants: 0x2a2a2a, staff: true });
+// 사장님은 번쩍이는 캬바레 셔츠
+const bartender = addPerson({ hair: 0x1c1512, style: 'short', shirt: 0xf1ede4, pants: 0x2a2a2a, staff: true, outfit: 'cabaret' });
 const BAR_HOME = { x: 0.6, y: 0.32, z: -6.4 };
 bartender.root.position.set(BAR_HOME.x, BAR_HOME.y, BAR_HOME.z);
 bartender.baseY = BAR_HOME.y;
 bartender.timer = 6;
 // 알바생 조풍순(29). 올드한 술집 마담 차림에 화장이 아주 진하다
-const server = addPerson({
+const PUNGSUN_OPTS = {
   name: '조풍순',
   hair: 0x4a1420,
   style: 'madam',
@@ -177,7 +182,8 @@ const server = addPerson({
   outfit: 'madam',
   // 하얀 피부
   skin: 0xffffff,
-});
+};
+const server = addPerson(PUNGSUN_OPTS);
 const SERVER_HOME = { x: -4.6, z: -5.5 };
 server.root.position.set(SERVER_HOME.x, 0, SERVER_HOME.z);
 server.speed = 2.2;
@@ -312,8 +318,8 @@ function toast(text) {
 const jobs = [];
 const later = (sec, fn) => jobs.push({ at: simT + sec, fn });
 
-const PUNGSUN_TAP = ['어머~ 풍순이 불렀어요? 호호', '오빠 오늘 멋지다~ 찡긋', '주문은 아래 버튼으로 해요~ 호호', '어머 손님, 풍순이한테 반했죠?'];
-const PUNGSUN_IDLE = ['어머~ 오늘 손님 많네', '호호호', '풍순이 오늘 화장 좀 됐죠?', '언니 오빠들 천천히 드세요~'];
+const PUNGSUN_TAP = ['어머~ 풍순이 불렀어요? 호호', '오빠 오늘 멋지다~ 찡긋', '주문은 아래 버튼으로 해요~ 호호', '어머 손님, 풍순이한테 반했죠?', '저기 사장님이 우리 자기예요~ 호호'];
+const PUNGSUN_IDLE = ['어머~ 오늘 손님 많네', '호호호', '풍순이 오늘 화장 좀 됐죠?', '언니 오빠들 천천히 드세요~', '우리 자기 오늘도 멋있다~ 호호'];
 const CHAT = ['여기 숲속 같다', '오늘 하루 고생했어', '이거 진짜 맛있다', '다음 주에 또 오자', '조명 너무 예쁘다', '한 잔 더?', 'ㅋㅋㅋㅋㅋ', '사진 찍자!', '요즘 어떻게 지내?', '여기 분위기 최고'];
 const REPLY = ['ㅋㅋㅋ 맞아', '와 진짜?', '그러니까!', '한 잔 하자', '나도 그 생각했어', '오 좋다'];
 const GREET = ['안녕하세요~', '같이 한 잔 해요!', '여기 자리 있어요~', '반가워요'];
@@ -377,7 +383,9 @@ function npcThink(p, dt) {
       }
     });
   } else if (r < 0.52) {
-    p.do('anju');
+    // 안주가 없으면 가운데 어묵탕을 떠 먹는다
+    if (p.seat.table.dishes.length && Math.random() < 0.55) p.do('anju');
+    else npcEomuk(p);
   } else if (r < 0.68) {
     if (p.drinks < 9) {
       p.do('oneshot');
@@ -403,15 +411,121 @@ let roam = null;
 const decides = () => !MULTI || isHost();
 
 function pungsunIdle(dt) {
+  // 손님에게 맞는 중에는 가만히 있는다
+  if (server.frozenUntil > simT) return;
   if (roam) return roamUpdate();
+  if (date) return dateUpdate();
   // 술게임 진행 중에는 진행만 한다
   if (!decides() || tableGames.size) return;
   if (server.job || server.jobs.length || server.state !== 'stand' || server.action) return;
+  // 맞고 들어온 사장님부터 챙긴다
+  if (comfortDue && !bossBusy() && bartender.state === 'stand') {
+    comfortDue = false;
+    return beginDate('comfort');
+  }
   server.idleT = (server.idleT ?? rnd(4, 8)) - dt;
   if (server.idleT > 0) return;
   server.idleT = rnd(8, 14);
+  if (!bossBusy()) {
+    if (boss.sulky && Math.random() < 0.7) return beginDate('soothe');
+    if (!boss.sulky && Math.random() < 0.25) return beginDate('love');
+  }
   if (Math.random() < 0.75 && goFlirt()) return;
   staffDo(server, 'hairflip', pick(PUNGSUN_IDLE), 2.2);
+}
+
+// ---------- 사장님과 풍순이 ----------
+// 둘은 연인. 풍순이가 바 앞에 가서 꽁냥대고, 삐진 사장님을 달래고, 맞고 들어온 사장님을 챙긴다
+// [풍순, 사장님]
+const LOVE = [
+  ['자기야~ 오늘 손님 많아서 힘들지?', '우리 풍순이 보니까 하나도 안 힘들어~'],
+  ['자기 오늘 셔츠 핏 미쳤다~ 호호', '풍순이 화장이 더 미쳤어~'],
+  ['자기야 이따 끝나고 포차 갈까?', '콜! 오늘 마감 일찍 한다~'],
+  ['자기~ 나 이뻐? 응? 응?', '세상에서 제일 이뻐, 우리 풍순이~'],
+];
+const SOOTHE = [
+  ['자기야~ 화 풀어~ 응? 풍순이가 뽀뽀해 줄게~', '...흥. 두 번.'],
+  ['우리 자기 삐졌어? 아이 귀여워~ 호호', '...안 삐졌거든.'],
+  ['자기야~ 손님들 다 보잖아~ 웃어 봐~', '...풍순이 때문에 참는다.'],
+];
+const COMFORT = [
+  ['자기 괜찮아? 많이 아팠지? 호오~', '풍순이 보니까 다 나았어...'],
+  ['어떡해 우리 자기 반창고... 흐엉', '괜찮아. 울지 마, 풍순아.'],
+];
+const LOVE_SEEN = ['아 둘이 사귀어?', '염장 지르네...', '사장님 부럽다...', '눈꼴셔 진짜ㅋㅋ'];
+const DATE_SPOT = { x: -0.6, z: -4.6 };
+let date = null;
+// 사장님 패기가 끝나면 켜진다. 사장님이 돌아오면 풍순이가 달래러 간다
+let comfortDue = false;
+
+// 방장(혼자면 나)이 정해서 모두에게 알린다
+function beginDate(k) {
+  const set = k === 'soothe' ? SOOTHE : k === 'comfort' ? COMFORT : LOVE;
+  const i = (Math.random() * set.length) | 0;
+  send('date', { k, i });
+  startDate(k, i);
+}
+
+function startDate(k, i) {
+  if (server.job || server.jobs.length) return;
+  roam = null;
+  server.action = null;
+  server.chatTable = null;
+  date = { k, i, phase: 'go', until: simT + 20 };
+  server.walkTo(planPath(server.pos, DATE_SPOT, W.obstacles));
+}
+
+function dateHome() {
+  date.phase = 'back';
+  server.walkTo(planPath(server.pos, SERVER_HOME, W.obstacles));
+}
+
+function dateUpdate() {
+  const D = date;
+  const b = bartender;
+  const set = D.k === 'soothe' ? SOOTHE : D.k === 'comfort' ? COMFORT : LOVE;
+  const L = set[D.i % set.length];
+  if (D.phase !== 'back' && simT > D.until) return dateHome();
+  if (D.phase === 'go' && server.state === 'stand') {
+    // 그 사이 사장님이 바빠지면 그냥 돌아간다
+    if (bossBusy() || b.state !== 'stand') return dateHome();
+    server.targetYaw = Math.atan2(b.pos.x - server.pos.x, b.pos.z - server.pos.z);
+    server.do(D.k === 'love' ? 'wink' : 'aegyo');
+    if (D.k === 'comfort') server.faceMood = 'sad';
+    say(server, L[0], 2.4);
+    hearts(server);
+    sound.smooch();
+    D.phase = 'talk';
+    D.t = simT + 2.2;
+  } else if (D.phase === 'talk' && simT >= D.t) {
+    if (server.faceMood === 'sad') server.faceMood = null;
+    if (bossBusy()) return dateHome();
+    if (D.k === 'soothe') {
+      // 삐진 사장님은 돌아보지 않고 대답만 한다. 기분이 많이 풀린다
+      say(b, L[1], 2.2);
+      if (!b.action && b.state === 'stand') b.do('humph');
+      later(1.8, () => setBossMood(boss.mood + 25));
+    } else {
+      b.targetYaw = Math.atan2(server.pos.x - b.pos.x, server.pos.z - b.pos.z);
+      if (!b.action && b.state === 'stand') b.do('laugh');
+      say(b, L[1], 2.4);
+      later(0.3, () => hearts(b));
+      if (D.k === 'comfort') later(1.2, () => setBossMood(boss.mood + 15));
+      if (D.k === 'love')
+        npcs
+          .filter((q) => q.seat && Math.abs(q.pos.z - server.pos.z) < 6)
+          .slice(0, 2)
+          .forEach((q, i) => later(1.2 + i * 0.5, () => say(q, pick(LOVE_SEEN), 1.8)));
+    }
+    D.phase = 'after';
+    D.t = simT + 2.6;
+  } else if (D.phase === 'after' && simT >= D.t) {
+    if (!boss.sulky && !bossBusy() && b.state === 'stand' && !b.action) b.targetYaw = 0;
+    dateHome();
+  } else if (D.phase === 'back' && server.state === 'stand') {
+    server.targetYaw = 0;
+    date = null;
+  }
 }
 
 // 손님이 있는 테이블 끝으로 간다. 갈 곳이 없으면 false
@@ -494,8 +608,9 @@ function hearts(p) {
 
 function serverUpdate() {
   // 주문이 들어오면 돌아다니던 걸 멈추고 서빙부터
-  if (roam && server.jobs.length) {
+  if ((roam || date) && server.jobs.length) {
     roam = null;
+    date = null;
     server.action = null;
   }
   if (!server.job && server.jobs.length) {
@@ -522,9 +637,10 @@ function serverUpdate() {
     later(0.6, () => {
       server.tray.remove(server.trayDish);
       server.tray.visible = false;
-      placeDish(W, scene, job.table, job.kind);
+      if (job.kind === 'refill') refillTrough(job.table);
+      else placeDish(W, scene, job.table, job.kind);
       sound.pop();
-      const name = MENU.find((m) => m.kind === job.kind).name;
+      const name = job.kind === 'refill' ? '오뎅 리필' : MENU.find((m) => m.kind === job.kind).name;
       say(server, `${name} 나왔어요~ 호호`, 2.2);
     });
     later(1.4, () => {
@@ -540,7 +656,7 @@ function serverUpdate() {
 
 // 바텐더는 가끔 손을 흔든다
 function bartenderUpdate(dt) {
-  if (party || kick || !decides()) return;
+  if (party || kick || brawl || !decides()) return;
   bartender.timer -= dt;
   if (bartender.timer < 0 && !bartender.action) {
     bartender.timer = rnd(8, 16);
@@ -548,7 +664,7 @@ function bartenderUpdate(dt) {
       bartender.timer = rnd(5, 9);
       staffDo(bartender, 'humph', pick(SASS), 2, Math.random() < 0.5);
     } else if (Math.random() < 0.5) {
-      staffDo(bartender, 'wave', pick(['어서오세요~', '편하게 계세요', '오늘 밤도 좋네요']), 2);
+      staffDo(bartender, 'wave', pick(['어서오세요~', '편하게 계세요', '오늘 밤도 좋네요', '풍순아~ 쉬엄쉬엄 해~']), 2);
     } else staffDo(bartender, 'talk', null);
   }
 }
@@ -594,7 +710,7 @@ function partyUpdate() {
         say(q, pick(CHEER_BACK), 2);
       })
     );
-    later(1.4, () => say(server, '어머 사장님 또 시작이시네~ 호호', 2.2));
+    later(1.4, () => say(server, '어머 우리 자기 또 시작이네~ 호호', 2.2));
     P.phase = 'dance';
   } else if (P.phase === 'dance' && !b.action) {
     b.hopTo(BAR_HOME.x, BAR_HOME.y, BAR_HOME.z, 0.6, 0.8, false);
@@ -612,7 +728,7 @@ function partyUpdate() {
 const boss = { mood: 100, sulky: false };
 const SASS = ['흥.', '네~ 네~', '알아서 하세요~', '주문은 마감이에요.', '...뭐요', '저 지금 기분 별로예요'];
 const REFUSE = ['안 받아요. 흥.', '오늘 주문 마감이에요~', '다른 데 가세요~', '지금 기분 아니에요.'];
-const bossBusy = () => party || kick;
+const bossBusy = () => party || kick || brawl;
 
 function setBossMood(v) {
   boss.mood = THREE.MathUtils.clamp(v, 0, 100);
@@ -698,12 +814,22 @@ const WARN = [
   ['손님. 다른 분들도 계십니다.', '손님, 한 번만 더 그러시면 곤란해요.'],
 ];
 
-function startJinsang() {
-  const lv = simT - (me.jinAt ?? -1e9) < ANGER_KEEP ? Math.min(3, (me.jinLv || 0) + 1) : 1;
+// 진상 단계 올리기. 난동, 알바생 때리기가 같은 단계를 쓴다
+function nextAngerLevel(step = 1) {
+  const lv = simT - (me.jinAt ?? -1e9) < ANGER_KEEP ? Math.min(3, (me.jinLv || 0) + step) : step;
   me.jinAt = simT;
   stats.jin++;
   // 쫓겨나면 다음 진상은 다시 1단계부터
   me.jinLv = lv === 3 ? 0 : lv;
+  if (lv === 3) {
+    me.locked = true;
+    me.lockedAt = simT;
+  } else later(1.2, () => toast(lv === 1 ? '사장님이 눈치를 줘요 (화남 1/3)' : '사장님 표정이 굳었어요 (화남 2/3) 한 번 더 하면 쫓겨나요'));
+  return lv;
+}
+
+function startJinsang() {
+  const lv = nextAngerLevel();
   me.path = [];
   if (me.state === 'walk') me.state = 'stand';
   me.do('tantrum');
@@ -711,10 +837,6 @@ function startJinsang() {
   // 경고 문구도 모두에게 같게 보이도록 고른 번호를 같이 보낸다
   const wi = (Math.random() * 2) | 0;
   send('jinsang', { lv, wi });
-  if (lv === 3) {
-    me.locked = true;
-    me.lockedAt = simT;
-  } else later(1.2, () => toast(lv === 1 ? '사장님이 눈치를 줘요 (화남 1/3)' : '사장님 표정이 굳었어요 (화남 2/3) 한 번 더 하면 쫓겨나요'));
   jinsangEffects(me, lv, wi);
 }
 
@@ -743,8 +865,8 @@ function faceBossTo(p) {
 }
 
 // 1, 2단계. 바에서 그 손님 쪽을 보며 말한다. 바쁠 때는 말만
-function bossWarn(p, lv, wi = 0) {
-  bossGrumble(p, WARN[lv - 1][wi % WARN[lv - 1].length], lv === 1 ? 'annoyed' : 'serious', lv === 2 ? 'warn' : null, lv === 2);
+function bossWarn(p, lv, wi = 0, set = WARN) {
+  bossGrumble(p, set[lv - 1][wi % set[lv - 1].length], lv === 1 ? 'annoyed' : 'serious', lv === 2 ? 'warn' : null, lv === 2);
 }
 
 // 사장님이 바에서 그 손님 쪽을 보며 한마디. 바쁠 때는 말만
@@ -765,12 +887,12 @@ function bossGrumble(p, line, face, act, big) {
 }
 
 // 3단계. 핏대 세우고 부들부들 떤 뒤 뛰어나간다
-function bossRage(p) {
+function bossRage(p, line = '...하.') {
   const b = bartender;
   b.timer = Math.max(b.timer, 6);
   b.chatTable = p.seat ? p.seat.table : null;
   b.faceMood = 'fury';
-  say(b, '...하.', 1.2);
+  say(b, line, 1.6, line !== '...하.');
   if (!bossBusy() && b.state === 'stand') {
     faceBossTo(p);
     b.do('rage');
@@ -822,7 +944,7 @@ const kickGone = (K) => !people.includes(K.target);
 function finishKick(K) {
   bartender.timer = rnd(8, 16);
   // 들어오는 사이에 또 진상을 부렸으면 다시 나온다
-  kick = K.again && !kickGone(K) ? { target: K.target, phase: 'wait' } : kickQueue.length ? { target: kickQueue.shift(), phase: 'wait' } : null;
+  kick = K.again && K.mode !== 'eomuk' && !kickGone(K) ? { target: K.target, phase: 'wait' } : kickQueue.length ? { target: kickQueue.shift(), phase: 'wait' } : null;
   if (!kick) {
     bartender.faceMood = null;
     if (boss.sulky) applySulkPose();
@@ -842,24 +964,26 @@ function kickUpdate() {
   const K = kick;
   if (!K) return;
   const b = bartender;
+  // 어묵탕을 말리러 갈 때는 화내지 않고 정색만 한다
+  const calm = K.mode === 'eomuk';
   if (K.phase === 'wait') {
     // 바 위에서 춤추던 중이면 바로 멈추고 거기서 앞으로 뛰어내린다
     if (party) {
       if (party.phase === 'dance') {
         party = null;
         b.action = null;
-        b.faceMood = 'fury';
-        say(b, '손님!!', 1.6, true);
+        b.faceMood = calm ? 'serious' : 'fury';
+        say(b, calm ? '손님, 잠깐만요.' : '손님!!', 1.6, !calm);
         K.phase = 'overUp';
       }
       return;
     }
-    if (b.state !== 'stand' || (b.action && b.action.type === 'rage')) return;
+    if (brawl || b.state !== 'stand' || (b.action && b.action.type === 'rage')) return;
     if (kickGone(K)) return finishKick(K);
     b.action = null;
-    b.faceMood = 'fury';
+    b.faceMood = calm ? 'serious' : 'fury';
     b.hopTo(BAR_HOME.x, COUNTER.y, COUNTER.z, 0.45, 0.8);
-    say(b, '손님!!', 1.6, true);
+    say(b, calm ? '손님, 잠깐만요.' : '손님!!', 1.6, !calm);
     K.phase = 'overUp';
   } else if (K.phase === 'overUp' && b.state === 'stand') {
     b.hopTo(BAR_HOME.x, 0, BAR_FRONT_Z, 0.45, 0.6);
@@ -874,19 +998,43 @@ function kickUpdate() {
     const t = K.target;
     b.chatTable = t.seat ? t.seat.table : null;
     b.targetYaw = Math.atan2(t.pos.x - b.pos.x, t.pos.z - b.pos.z);
+    if (calm) {
+      // 손바닥을 내밀며 그만 드시죠. 내보내지는 않는다
+      b.faceMood = 'serious';
+      b.do('stop');
+      say(b, '그만 드시죠.', 2.6, true);
+      K.phase = 'stop';
+      K.retorted = true;
+      K.holdUntil = simT + 2.6;
+      t.targetYaw = Math.atan2(b.pos.x - t.pos.x, b.pos.z - t.pos.z);
+      later(1.3, () => say(t, EOMUK_REPLY[(t.eomukTotal || 0) % EOMUK_REPLY.length], 2));
+      // 앉은 채로 돌아봤으면 다시 테이블 쪽으로
+      later(3, () => t.seat && (t.targetYaw = t.seat.yaw));
+      return;
+    }
     b.faceMood = 'fury';
     b.do('stop');
-    say(b, '나가주세요!', 2.6, true);
+    say(b, '나가주시죠.', 2.6, true);
     K.phase = 'stop';
     K.retorted = false;
-    // 쫓겨나는 사람이 말대꾸한다. 내 쪽은 내가 고르고, 친구는 그 친구가 보낸 retort 를 기다린다
-    K.holdUntil = simT + 6;
-    if (t === me) later(1.4, startRetort);
+    // 쫓겨나는 사람이 말대꾸하거나 버틴다. 내 쪽은 내가 고르고, 친구는 그 친구가 보낸 신호를 기다린다
+    K.holdUntil = simT + 8;
+    if (t === me) later(1.4, askKickChoice);
     else if (t.pendingRetort) {
       const r = t.pendingRetort;
       t.pendingRetort = null;
       later(1.4, () => runRetort(t, r.i, r.j));
+    } else if (t.pendingHold) {
+      const h = t.pendingHold;
+      t.pendingHold = null;
+      later(1.4, () => runHold(t, h.ok, h.j));
+    } else if (t.pendingFight) {
+      t.pendingFight = false;
+      later(1.4, () => runFight(t));
     }
+  } else if (K.phase === 'hold' && kickGone(K)) {
+    // 버티던 친구가 나가 버리면 사장님은 돌아간다
+    walkBossHome(K);
   } else if (K.phase === 'stop' && !K.retorted && simT >= K.holdUntil) {
     // 말대꾸 신호가 안 오면 그냥 내보낸다
     K.retorted = true;
@@ -894,7 +1042,7 @@ function kickUpdate() {
     kickOut(K.target, 0);
   } else if (K.phase === 'stop' && K.retorted && !b.action && simT >= K.holdUntil) {
     walkBossHome(K);
-  } else if (K.phase === 'back' && K.again && !kickGone(K)) {
+  } else if (K.phase === 'back' && K.again && !calm && !kickGone(K)) {
     // 바로 돌아서서 다시 뛰어온다
     K.again = false;
     b.speed = BOSS_RUN;
@@ -925,6 +1073,306 @@ const EXIT_SHOUT = [
   ['두고 봐요 진짜!', '하아...'],
   ['내일 또 올 거예요~ 메롱!', '...소금 뿌려.'],
 ];
+
+// ---------- 버티기 ----------
+// 나가라는데 안 나간다. 풍순이가 달려와 사장님을 말려 준다. 하루에 한 번만 통한다
+const HOLD_KEY = 'pungsok-hold-day';
+const HOLD_LINES = ['안 나가요!! 절대 못 나가요!!', '여기 의자랑 한 몸이에요!!', '저 이 집 아니면 갈 데 없어요!!'];
+let kickChoice = null;
+
+const today = () => new Date().toLocaleDateString('ko-KR');
+function holdUsedToday() {
+  try {
+    return localStorage.getItem(HOLD_KEY) === today();
+  } catch {
+    return false;
+  }
+}
+
+function askKickChoice() {
+  if (!kick || kick.target !== me || kick.phase !== 'stop' || kick.retorted) return;
+  kickChoice = { until: simT + 3 };
+  const used = holdUsedToday();
+  $('#holdSub').textContent = used ? '오늘은 안 통할걸요...' : '안 나가요!!';
+  $('#kickHint').textContent = used ? '버티기는 하루에 한 번만 통해요' : '버티면 풍순이가 말려 줄지도? 안 고르면 말대꾸하고 나가요';
+  $('#kickCount').textContent = '3';
+  $('#kickSheet').classList.add('show');
+}
+
+function pickKick(c) {
+  if (!kickChoice) return;
+  kickChoice = null;
+  $('#kickSheet').classList.remove('show');
+  if (!kick || kick.target !== me || kick.retorted) return;
+  if (c === 'hold') startHold();
+  else if (c === 'fight') startFight();
+  else startRetort();
+}
+
+function kickChoiceUpdate() {
+  if (!kickChoice) return;
+  if (!kick || kick.target !== me) {
+    kickChoice = null;
+    $('#kickSheet').classList.remove('show');
+    return;
+  }
+  $('#kickCount').textContent = String(Math.max(1, Math.ceil(kickChoice.until - simT)));
+  if (simT >= kickChoice.until) pickKick('retort');
+}
+document.querySelectorAll('[data-kick]').forEach((el) => (el.onclick = () => pickKick(el.dataset.kick)));
+
+function startHold() {
+  const ok = !holdUsedToday();
+  if (ok) {
+    try {
+      localStorage.setItem(HOLD_KEY, today());
+    } catch {}
+  }
+  stats.hold++;
+  const i = (Math.random() * HOLD_LINES.length) | 0;
+  const j = (Math.random() * EXIT_SHOUT.length) | 0;
+  send('hold', { ok: ok ? 1 : 0, i, j });
+  runHold(me, ok, j, i);
+}
+
+function runHold(t, ok, j, i = 0) {
+  if (!people.includes(t)) return;
+  const K = kick && kick.target === t ? kick : null;
+  if (K) {
+    K.retorted = true;
+    K.phase = 'hold';
+  }
+  const b = bartender;
+  t.targetYaw = Math.atan2(b.pos.x - t.pos.x, b.pos.z - t.pos.z);
+  t.faceMood = 'angry';
+  t.do('tantrum', 1.5);
+  say(t, HOLD_LINES[i % HOLD_LINES.length], 2.2, true);
+  sound.bang();
+  later(0.6, () => setBossMood(boss.mood - 10));
+  later(1.4, () => {
+    b.faceMood = 'fury';
+    say(b, '...손님.', 1.2);
+  });
+  pungsunMediate(t, ok);
+  if (ok) {
+    later(5.2, () => {
+      say(b, '...풍순이 봐서 참는다. 오늘만이에요.', 2.6, true);
+      if (!b.action && b.state === 'stand') b.do('humph');
+      sound.humph();
+      setBossMood(boss.mood - 25);
+    });
+    later(7.8, () => {
+      t.faceMood = null;
+      if (t.seat) t.targetYaw = t.seat.yaw;
+      if (K && kick === K) walkBossHome(K);
+      if (t === me) {
+        me.locked = false;
+        toast('풍순이 덕분에 버텼어요! 오늘은 다시 안 통해요');
+      }
+    });
+  } else {
+    later(5.2, () => {
+      say(b, '풍순아, 이번엔 안 돼. 나가주시죠.', 2.6, true);
+      if (b.state === 'stand') b.do('stop', 1.8);
+    });
+    later(6.0, () => say(server, '어머... 손님 미안해요~', 1.8));
+    later(7.4, () => {
+      if (K && kick === K) {
+        K.phase = 'stop';
+        K.holdUntil = simT + 1;
+      }
+      kickOut(t, j);
+    });
+  }
+}
+
+// ---------- 너가 뭔데? ----------
+// 나가라는 사장님을 밀쳐 눕히고 마구 밟는다. 일어나면 사장님이 삐져서 주문을 안 받는다
+// 나는 안 쫓겨난다
+let knockout = null;
+
+function startFight() {
+  stats.ko++;
+  send('fight');
+  runFight(me);
+}
+
+function runFight(t) {
+  if (!people.includes(t)) return;
+  const K = kick && kick.target === t ? kick : null;
+  if (K) {
+    K.retorted = true;
+    K.phase = 'fight';
+  }
+  const b = bartender;
+  if (t.seat) t.standUp();
+  t.path = [];
+  t.targetYaw = Math.atan2(b.pos.x - t.pos.x, b.pos.z - t.pos.z);
+  t.faceMood = 'fury';
+  t.do('tantrum', 1.0);
+  say(t, '너가 뭔데?', 1.6, true);
+  sound.bang();
+  later(1.0, () => {
+    b.faceMood = 'fury';
+    say(b, '...뭐요?', 1.0);
+  });
+  // 확 밀쳐서 눕힌다
+  later(1.4, () => {
+    t.targetYaw = Math.atan2(b.pos.x - t.pos.x, b.pos.z - t.pos.z);
+    b.targetYaw = Math.atan2(t.pos.x - b.pos.x, t.pos.z - b.pos.z);
+    t.action = null;
+    // 풍순이 때리기 때 걸어 둔 것이 다시 불리지 않게
+    t.onSlap = null;
+    t.do('slap');
+    say(t, '저리 가!!', 1.2, true);
+  });
+  later(1.75, () => {
+    b.action = null;
+    b.faceMood = null;
+    b.setKnocked(true);
+    b.setPlaster(true);
+    later(90, () => b.setPlaster(false));
+    sound.slap();
+    sound.bang();
+    say(b, '어어억?!', 1.2, true);
+    knockout = { t, spark: 0 };
+    npcs.slice(0, 4).forEach((q, i) => later(0.5 + i * 0.3, () => say(q, pick(['헐 사장님을?!', '눕혔어!!', '대박...']), 1.6)));
+    pungsunRush(b, '자기야!!!', '그만 밟아요!! 우리 자기 죽어!!');
+    // 누운 사장님 옆으로 한 걸음 다가간다
+    const fx = Math.sin(b.yaw);
+    const fz = Math.cos(b.yaw);
+    const spot = { x: b.pos.x - fx * 0.3 + fz * 0.34, z: b.pos.z - fz * 0.3 - fx * 0.34 };
+    pushOut(spot, W.obstacles);
+    t.walkTo([spot]);
+  });
+  // 쿵! 쿵! 밟는다
+  later(2.8, () => {
+    // 누운 사장님 배 쪽을 본다
+    const fx = Math.sin(b.yaw);
+    const fz = Math.cos(b.yaw);
+    const belly = { x: b.pos.x - fx * 0.45, z: b.pos.z - fz * 0.45 };
+    if (t.state === 'walk') {
+      t.path = [];
+      t.state = 'stand';
+    }
+    t.targetYaw = Math.atan2(belly.x - t.pos.x, belly.z - t.pos.z);
+    t.onStomp = () => {
+      sound.slap();
+      b.flinch = 1;
+      W.sparkle(new THREE.Vector3(belly.x, 0.35, belly.z));
+    };
+    t.do('stomp');
+    say(t, '쿵! 쿵! 쿵!! 밟아 주마!!', 2.4, true);
+    later(0.8, () => say(b, '아악! 아파요!!', 1.4, true));
+    later(2.4, () => say(b, '자, 잘못했어요...', 1.6));
+  });
+  // 다 밟고 나서 의기양양
+  later(7.1, () => {
+    t.onStomp = null;
+    t.faceMood = 'happy';
+    t.do('yeah', 2.4);
+    say(t, '덤벼!! 덤벼 보라고!!', 2.2, true);
+    say(b, '으... 으어...', 2.4);
+    npcs.slice(0, 3).forEach((q, i) => later(0.8 + i * 0.4, () => say(q, pick(['사장님 납작해졌다...', 'KO다 KO!!', '119 불러야 돼?']), 1.6)));
+  });
+  later(9.0, () => say(server, '자기야!! 정신 차려!! 흐엉', 2.4, true));
+  later(11.4, () => {
+    server.targetYaw = Math.atan2(t.pos.x - server.pos.x, t.pos.z - server.pos.z);
+    if (!server.action) server.do('humph');
+    say(server, '손님 너무해요!! 흥!!', 2);
+  });
+  // 일어나서 삐진다
+  later(13.6, () => {
+    knockout = null;
+    b.setKnocked(false);
+    b.flinch = 0;
+    // 삐짐 대사보다 이 대사가 보이도록 먼저 기분을 바꾼다
+    setBossMood(0);
+    b.faceMood = 'pout';
+    say(b, '...오늘 장사 끝이에요. 흥.', 2.6, true);
+    t.faceMood = null;
+    if (t === me) {
+      me.locked = false;
+      toast('사장님을 눕혀서 밟았어요! 사장님이 삐져서 주문을 안 받아요');
+    }
+  });
+  later(14.8, () => {
+    if (K && kick === K) walkBossHome(K);
+  });
+}
+
+// 쓰러진 사장님 머리 위로 별이 돈다
+function knockoutUpdate(dt) {
+  const O = knockout;
+  if (!O) return;
+  O.spark -= dt;
+  if (O.spark <= 0) {
+    O.spark = 0.45;
+    W.sparkle(bartender.headWorld(new THREE.Vector3()).add(new THREE.Vector3(Math.cos(simT * 4) * 0.3, 0.25, Math.sin(simT * 4) * 0.3)));
+  }
+}
+
+// 풍순이가 그 사람 옆으로 달려온다. 서빙 중이면 멀리서 말만
+function pungsunRush(near, shout, line) {
+  later(0.4, () => say(server, shout, 1.6, true));
+  if (server.job || server.jobs.length) {
+    later(2.4, () => say(server, line, 2.2, true));
+    return;
+  }
+  roam = null;
+  date = null;
+  server.action = null;
+  server.chatTable = null;
+  server.frozenUntil = simT + 15;
+  server.faceMood = 'sad';
+  const spot = { x: near.pos.x - 0.9, z: near.pos.z + 0.5 };
+  pushOut(spot, W.obstacles);
+  spot.x = THREE.MathUtils.clamp(spot.x, ME_BOUNDS.x0, ME_BOUNDS.x1);
+  spot.z = THREE.MathUtils.clamp(spot.z, ME_BOUNDS.z0, ME_BOUNDS.z1);
+  server.speed = 3.6;
+  server.walkTo(planPath(server.pos, spot, W.obstacles));
+  const arrive = Math.min(3.5, Math.hypot(server.pos.x - spot.x, server.pos.z - spot.z) / 3.0 + 0.4);
+  later(Math.max(2.4, arrive), () => {
+    server.speed = 2.2;
+    server.targetYaw = Math.atan2(near.pos.x - server.pos.x, near.pos.z - server.pos.z);
+    if (!server.action && server.state === 'stand') server.do('hurt');
+    say(server, line, 2.2, true);
+  });
+  later(14, () => {
+    if (server.faceMood === 'sad') server.faceMood = null;
+    if (!server.job && !server.jobs.length) server.walkTo(planPath(server.pos, SERVER_HOME, W.obstacles));
+  });
+}
+
+// 풍순이가 사장님과 손님 사이로 달려와 말린다. 서빙 중이면 멀리서 말만
+function pungsunMediate(t, ok) {
+  const line = ok ? '자기야~ 참아~ 손님이 술이 좀 되셨나 봐~ 호호' : '자기야~ 한 번만 더 참...';
+  if (server.job || server.jobs.length) {
+    later(2.6, () => say(server, line, 2.4));
+    return;
+  }
+  roam = null;
+  date = null;
+  server.action = null;
+  server.chatTable = null;
+  server.frozenUntil = simT + 10;
+  const spot = { x: (t.pos.x + bartender.pos.x) / 2 + 0.5, z: (t.pos.z + bartender.pos.z) / 2 + 0.3 };
+  pushOut(spot, W.obstacles);
+  spot.x = THREE.MathUtils.clamp(spot.x, ME_BOUNDS.x0, ME_BOUNDS.x1);
+  spot.z = THREE.MathUtils.clamp(spot.z, ME_BOUNDS.z0, ME_BOUNDS.z1);
+  server.speed = 3.6;
+  server.walkTo(planPath(server.pos, spot, W.obstacles));
+  later(1.2, () => say(server, '자기야 잠깐만!!', 1.4, true));
+  const arrive = Math.min(3.5, Math.hypot(server.pos.x - spot.x, server.pos.z - spot.z) / 3.0 + 0.4);
+  later(Math.max(2.6, arrive), () => {
+    server.speed = 2.2;
+    server.targetYaw = Math.atan2(bartender.pos.x - server.pos.x, bartender.pos.z - server.pos.z);
+    if (!server.action && server.state === 'stand') server.do('aegyo');
+    say(server, line, 2.4);
+    if (ok) hearts(server);
+  });
+  later(9, () => !server.job && !server.jobs.length && server.walkTo(planPath(server.pos, SERVER_HOME, W.obstacles)));
+}
 
 function startRetort() {
   const i = (Math.random() * RETORT.length) | 0;
@@ -1008,7 +1456,7 @@ function seatFront(s) {
 
 function meUpdate() {
   // 안전장치. 진상 뒤에 사장님 일이 하나도 없으면 다시 부른다
-  if (me.locked && !me.kickedOut && !kickPendingFor(me) && simT - (me.lockedAt || 0) > 3) requestKick(me);
+  if (me.locked && !me.kickedOut && !brawl && !tennisOn && !kickPendingFor(me) && simT - (me.lockedAt || 0) > 3) requestKick(me);
   if (me.kickedOut && me.state === 'stand') {
     me.locked = false;
     exitShout(me);
@@ -1206,7 +1654,7 @@ $('#bShot').onclick = () => {
 $('#bAnju').onclick = () => {
   if (blocked() || me.action || needSeat()) return;
   if (!me.seat.table.dishes.length) {
-    toast('테이블에 안주가 없어요. 주문해 보세요');
+    toast('안주가 없어요. 주문하거나 가운데 어묵탕을 눌러 보세요');
     return;
   }
   me.do('anju');
@@ -1221,6 +1669,7 @@ $('#bTalk').onclick = () => {
 };
 function setFold(fold) {
   chatBox.classList.toggle('fold', fold);
+  setTimeout(updateViewOffset, 0);
   $('#chatFold').textContent = fold ? '+' : '−';
 }
 $('#chatFold').onclick = () => setFold(!chatBox.classList.contains('fold'));
@@ -1265,15 +1714,18 @@ menuBox.querySelectorAll('[data-kind]').forEach((b) => {
       sound.humph();
       return;
     }
-    toast(`${b.dataset.name} 주문했어요`);
-    stats.order++;
-    send('order', { tid: me.seat.table.id, kind: b.dataset.kind });
-    acceptOrder(me.seat.table, b.dataset.kind);
+    const kind = b.dataset.kind;
+    send('order', { tid: me.seat.table.id, kind });
+    const ok = acceptOrder(me.seat.table, kind, me);
+    toast(ok ? `${b.dataset.name} 주문했어요` : '사장님이 오뎅 리필을 막았어요...');
+    if (ok && kind !== 'refill') stats.order++;
   };
 });
 
 // 주문 받기. 내 주문이든 친구 주문이든 똑같이 서빙하고 환호한다
-function acceptOrder(T, kind) {
+// 받았으면 true. 오뎅 리필이 너무 잦으면 false
+function acceptOrder(T, kind, who) {
+  if (kind === 'refill') return acceptRefill(T, who);
   server.jobs.push({ table: T, kind });
   T.bill.items[kind] = (T.bill.items[kind] || 0) + 1;
   sound.bell();
@@ -1282,6 +1734,39 @@ function acceptOrder(T, kind) {
     bartender.do('wave');
     later(1.2, () => startParty(T));
   }
+  return true;
+}
+
+// 오뎅 리필은 공짜. 한 테이블이 3분 안에 세 번째로 시키면 사장님이 나와서 "그만 드시죠."
+const REFILL_LIMIT = 2;
+const REFILL_WINDOW = 180;
+function acceptRefill(T, who) {
+  T.refills = (T.refills || []).filter((t) => simT - t < REFILL_WINDOW);
+  sound.bell();
+  if (T.refills.length >= REFILL_LIMIT) {
+    T.refills = [];
+    say(bartender, '오뎅 리필이요? ...또요?', 1.8);
+    if (who && people.includes(who)) later(1.0, () => stopEating(who));
+    return false;
+  }
+  T.refills.push(simT);
+  server.jobs.push({ table: T, kind: 'refill' });
+  T.bill.items.refill = (T.bill.items.refill || 0) + 1;
+  if (!bossBusy()) {
+    say(bartender, '오뎅 리필 들어갑니다~', 2);
+    if (!bartender.action && bartender.state === 'stand') bartender.do('wave');
+  }
+  return true;
+}
+
+// 가운데 통에 오뎅을 쏟아 붓는다
+function refillTrough(T) {
+  W.sparkle(new THREE.Vector3(T.x, TABLE_H + 0.3, T.z));
+  if (T.pot) T.pot.boost = 2.5;
+  seated(T)
+    .filter((q) => !q.isMe && !q.remote)
+    .slice(0, 2)
+    .forEach((q, i) => later(0.6 + i * 0.4, () => say(q, pick(['오~ 리필이다!', '국물 끝내준다', '풍순씨 최고!']), 1.6)));
 }
 
 const soundBtn = $('#bSound');
@@ -1317,9 +1802,21 @@ function goToilet(kind) {
 }
 
 $('#bJinsang').onclick = () => {
-  if (blocked() || me.action) return;
-  startJinsang();
+  if (blocked()) return;
+  $('#jinSheet').classList.add('show');
 };
+$('#jinClose').onclick = () => $('#jinSheet').classList.remove('show');
+document.querySelectorAll('[data-jin]').forEach(
+  (b) =>
+    (b.onclick = () => {
+      $('#jinSheet').classList.remove('show');
+      // 건배 같은 다른 동작 중이어도 진상은 끊고 들어간다. 진상끼리만 겹치지 않게
+      if (blocked() || (me.action && ['tantrum', 'slap'].includes(me.action.type))) return;
+      if (b.dataset.jin === 'rant') startJinsang();
+      else if (b.dataset.jin === 'slap') startSlap();
+      else startBeat();
+    })
+);
 $('#bCam').onclick = () => {
   camReset = true;
 };
@@ -1349,6 +1846,8 @@ $('#enter').onclick = () => {
   sound.start();
   $('#intro').classList.add('hide');
   $('#chat').hidden = false;
+  updateViewOffset();
+  camReset = true;
   setTimeout(() => toast('빈 의자를 누르면 앉고, 바닥을 누르면 걸어가요'), 600);
 };
 
@@ -1357,15 +1856,17 @@ const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 let down = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  down = { x: e.clientX, y: e.clientY, t: performance.now() };
+  // 처리 시각이 아니라 이벤트가 생긴 시각으로 잰다. 느린 휴대폰에서 짧게 누른 것도 길게 누른 것으로 보던 문제
+  down = { x: e.clientX, y: e.clientY, t: e.timeStamp };
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (!down) return;
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-  const quick = performance.now() - down.t < 500;
+  const quick = e.timeStamp - down.t < 500;
   down = null;
   if (moved > 8 || !quick) return;
   sound.start();
+  if (tennisOn) return tennis.swing();
   if (blocked()) return;
   const r = renderer.domElement.getBoundingClientRect();
   ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
@@ -1390,6 +1891,17 @@ renderer.domElement.addEventListener('pointerup', (e) => {
         const same = me.seat && p.seat && me.seat.table === p.seat.table;
         say(p, same ? '짠 할까요?' : pick(GREET), 2);
       }
+      return;
+    }
+    if (o.userData.eomukTable) {
+      const T = o.userData.eomukTable;
+      if (me.seat && me.seat.table === T) return goEomuk();
+      if (me.seat) return toast('우리 테이블 어묵탕에서 드세요~');
+      // 안 앉았으면 그 테이블 빈자리로 간다
+      const s = T.seats.find((q) => !q.occupant);
+      if (!s) return toast('그 테이블은 자리가 없어요');
+      goTo({ x: s.x, z: s.z }, s);
+      toast('앉아서 가운데 어묵탕을 누르면 떠 먹어요');
       return;
     }
     if (o.userData.seat) {
@@ -1437,17 +1949,66 @@ function ripple(x, z) {
 function resize() {
   const w = app.clientWidth;
   const h = app.clientHeight;
+  if (!w || !h) return;
   renderer.setSize(w, h);
   composer.setSize(w, h);
   bloom.resolution.set(w / 2, h / 2);
   camera.aspect = w / h;
   // 세로 화면은 조금 멀리서 본다
   camera.fov = w < h ? 52 : 40;
-  camera.updateProjectionMatrix();
+  viewOffY = -1;
+  updateViewOffset();
   W.setPixelScale(((h * DPR) / (2 * Math.tan((camera.fov * Math.PI) / 360))) * 0.01);
 }
+
+// 위쪽 상태 표시와 아래쪽 버튼, 수다방에 가리지 않는 가운데에 화면 중심이 오도록 그림을 올린다
+let viewOffY = -1;
+let visTop = 0;
+let visBottom = 9999;
+function updateViewOffset() {
+  const w = app.clientWidth;
+  const h = app.clientHeight;
+  if (!w || !h) return;
+  const topB = $('#brand').getBoundingClientRect().bottom;
+  let bottomT = $('#actions').getBoundingClientRect().top;
+  const chat = $('#chat');
+  if (!chat.hidden) {
+    const r = chat.getBoundingClientRect();
+    // 수다방이 화면 가운데를 가로질러 있을 때만(좁은 화면) 가리는 것으로 본다
+    if (r.width > w * 0.5 && r.height) bottomT = Math.min(bottomT, r.top);
+  }
+  visTop = topB;
+  visBottom = bottomT;
+  const off = Math.round(THREE.MathUtils.clamp((h - bottomT - topB) / 2, 0, h * 0.3));
+  if (off === viewOffY) return;
+  viewOffY = off;
+  if (off) camera.setViewOffset(w, h, 0, off, w, h);
+  else camera.clearViewOffset();
+  camera.updateProjectionMatrix();
+}
+
 window.addEventListener('resize', resize);
+// 휴대폰은 주소창이나 키보드가 나타나고 사라질 때 크기가 바뀐다
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
+
+// 휴대폰에서 화면이 확대되거나 밀려서 엉뚱한 곳을 보게 되는 것을 막는다
+const TOUCH_UI = window.matchMedia('(pointer: coarse)').matches;
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('dblclick', (e) => e.preventDefault());
+document.addEventListener('focusout', () => setTimeout(() => window.scrollTo(0, 0), 60));
+
+// 손가락으로 돌린 시점은 잠시 뒤 원래대로 돌아온다. 내 캐릭터가 화면 밖으로 나가도 다시 맞춘다
+let camTouching = false;
+let camTouchedAt = 0;
+controls.addEventListener('start', () => {
+  camTouching = true;
+  camReset = false;
+});
+controls.addEventListener('end', () => {
+  camTouching = false;
+  camTouchedAt = performance.now();
+});
 
 // 매 프레임
 const clock = new THREE.Clock();
@@ -1645,7 +2206,7 @@ function applyHi(r, d) {
     p.lk = d.lk;
     p.setLook(lookFromIdx(decodeLook(d.lk)));
   }
-  if (p.state === 'hop' || p.kickedOut || p.wc) return;
+  if (p.state === 'hop' || p.kickedOut || p.wc || p.tennis || (brawl && brawl.p === p)) return;
   const seat = seatFromKey(d.s);
   if (seat) {
     if (p.seat === seat) return;
@@ -1741,7 +2302,7 @@ function onNet(m) {
   if (m.t === 'roamHome') return !decides() && roamHome();
   if (m.t === 'boss') return !isHost() && syncBoss(d.m, d.s);
   if (m.t === 'poke') return pokeBoss(true);
-  if (m.t === 'order') return W.tables[d.tid] && acceptOrder(W.tables[d.tid], d.kind);
+  if (m.t === 'order') return W.tables[d.tid] && acceptOrder(W.tables[d.tid], d.kind, peers.get(m.f) && peers.get(m.f).p);
   if (m.t === 'pay') return W.tables[d.tid] && peers.get(m.f) && applyPay(peers.get(m.f).p, W.tables[d.tid], d.mode, d.total | 0);
   // 나머지는 그 사람 캐릭터가 하는 일
   const r = peers.get(m.f);
@@ -1756,13 +2317,37 @@ function onNet(m) {
       p.lk = d.lk;
       p.setLook(lookFromIdx(decodeLook(d.lk)));
     }
+  } else if (m.t === 'slapGo') {
+    pungsunHold();
+  } else if (m.t === 'slap') {
+    if (!p.action) p.do('slap');
+    slapEffects(p, Math.min(3, Math.max(1, d.lv | 0 || 1)), d.wi | 0);
+  } else if (m.t === 'beat') {
+    if (!brawl) beatBoss(p);
+  } else if (m.t === 'date') {
+    if (!decides() && ['love', 'soothe', 'comfort'].includes(d.k)) {
+      comfortDue = false;
+      startDate(d.k, d.i | 0);
+    }
+  } else if (m.t === 'eomuk') {
+    if (!p.wc && !p.kickedOut) runEomuk(p);
+  } else if (m.t === 'tennis') {
+    setPeerTennis(p, !!d.on);
   } else if (m.t === 'puke') {
     if (!p.kickedOut && !p.wc) runPuke(p);
   } else if (m.t === 'wc') {
     if (WC[d.k] && !p.wc && !p.kickedOut) runToilet(p, d.k);
   } else if (m.t === 'say') say(p, String(d.t).slice(0, 40), 3, !!d.b);
   else if (m.t === 'act') remoteAct(p, d.a);
-  else if (m.t === 'retort') {
+  else if (m.t === 'fight') {
+    if (kick && kick.target === p && kick.phase === 'stop' && !kick.retorted) runFight(p);
+    else p.pendingFight = true;
+  } else if (m.t === 'hold') {
+    const j = Math.min(EXIT_SHOUT.length - 1, Math.max(0, d.j | 0));
+    const i = Math.max(0, d.i | 0);
+    if (kick && kick.target === p && kick.phase === 'stop' && !kick.retorted) runHold(p, !!d.ok, j, i);
+    else p.pendingHold = { ok: !!d.ok, j };
+  } else if (m.t === 'retort') {
     const i = Math.min(RETORT.length - 1, Math.max(0, d.i | 0));
     const j = Math.min(EXIT_SHOUT.length - 1, Math.max(0, d.j | 0));
     if (kick && kick.target === p && kick.phase === 'stop' && !kick.retorted) runRetort(p, i, j);
@@ -1901,6 +2486,8 @@ function billLines(T) {
     const q = T.bill.items[m.kind] || 0;
     if (q) rows.push({ name: m.name, qty: q, price: q * PRICE[m.kind] });
   }
+  const rf = T.bill.items.refill || 0;
+  if (rf) rows.push({ name: '오뎅 리필 (서비스)', qty: rf, price: 0 });
   const bottles = Math.ceil(T.bill.shots / SOJU_SHOTS);
   if (bottles) rows.push({ name: `소주 (${T.bill.shots}잔)`, qty: bottles, price: bottles * SOJU_PRICE, unit: '병' });
   return { rows, total: rows.reduce((a, r) => a + r.price, 0) };
@@ -2367,6 +2954,423 @@ function showInfo(title, text) {
 }
 $('#infoClose').onclick = () => $('#info').classList.remove('show');
 
+// ---------- 알바생 때리기 ----------
+// 풍순이에게 걸어가 손바닥으로 철썩. 난동과 같은 진상 단계가 오른다
+const WARN_SLAP = [
+  ['손님... 우리 풍순이한테 왜 그러세요?', '손님, 직원한테 손대시면 안 됩니다.'],
+  ['지금 내 여자한테 뭐 하는 거예요!!', '감히 우리 풍순이를...! 한 번만 더 해 봐요.'],
+];
+const SLAP_CRY = ['아야!! 자기야~!!', '어머머 이 손님 미쳤나 봐!! 자기야!!', '꺄악! 내 화장 번져!! 자기야~!!'];
+
+// 풍순이를 그 자리에 세운다
+function pungsunHold() {
+  if (roam) roamHome();
+  roam = null;
+  date = null;
+  if (!server.job && server.state === 'walk') {
+    server.path = [];
+    server.state = 'stand';
+  }
+  server.frozenUntil = simT + 9;
+}
+
+function startSlap() {
+  if (server.job || server.jobs.length) return toast('풍순이가 서빙 중이에요. 조금 이따가...');
+  if (me.wc || me.locked) return;
+  send('slapGo');
+  pungsunHold();
+  me.attack = { until: simT + 10, next: 0 };
+}
+
+// 풍순이 옆까지 따라가서 닿으면 때린다
+function attackUpdate() {
+  const A = me.attack;
+  if (!A) return;
+  if (me.locked || me.wc || simT > A.until) {
+    me.attack = null;
+    return;
+  }
+  const d = Math.hypot(me.pos.x - server.pos.x, me.pos.z - server.pos.z);
+  if (d < 1.0 && me.state !== 'walk') {
+    me.attack = null;
+    me.targetYaw = Math.atan2(server.pos.x - me.pos.x, server.pos.z - me.pos.z);
+    me.onSlap = () => {
+      // 사장님 애인이라 한 번에 두 단계
+      const lv = nextAngerLevel(2);
+      const wi = (Math.random() * 3) | 0;
+      send('slap', { lv, wi });
+      slapEffects(me, lv, wi);
+    };
+    me.do('slap');
+    return;
+  }
+  if (simT >= A.next) {
+    A.next = simT + 0.7;
+    const dx = me.pos.x - server.pos.x;
+    const dz = me.pos.z - server.pos.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const spot = { x: server.pos.x + (dx / len) * 0.75, z: server.pos.z + (dz / len) * 0.75 };
+    pushOut(spot, W.obstacles);
+    goTo(spot);
+  }
+}
+
+function slapEffects(p, lv, wi) {
+  sound.slap();
+  W.sparkle(server.headWorld(new THREE.Vector3()));
+  server.frozenUntil = simT + 3;
+  server.action = null;
+  server.targetYaw = Math.atan2(p.pos.x - server.pos.x, p.pos.z - server.pos.z);
+  server.do('hurt');
+  server.faceMood = 'sad';
+  later(4, () => (server.faceMood = null));
+  say(p, '에잇!', 1.2, true);
+  later(0.4, () => say(server, SLAP_CRY[wi % SLAP_CRY.length], 2.2, true));
+  npcs
+    .filter((q) => q.pos.distanceTo(p.pos) < 5)
+    .slice(0, 3)
+    .forEach((q, i) => later(0.8 + i * 0.3, () => say(q, pick(['헐!!', '때렸어...?', '와 미쳤다']), 1.6)));
+  if (lv < 3) {
+    later(1.4, () => bossWarn(p, lv, wi % 2, WARN_SLAP));
+    later(1.8, () => setBossMood(boss.mood - (lv === 1 ? 15 : 30)));
+    return;
+  }
+  later(1.2, () => bossRage(p, '감히 우리 풍순이를!!!'));
+  later(1.8, () => setBossMood(boss.mood - 40));
+  later(2.4, () => requestKick(p));
+}
+
+// ---------- 사장님 패기 ----------
+// 풍순이가 울면서 바 앞으로 달려와 말린다. 서빙 중이면 소리만 지른다
+function pungsunRunsOver() {
+  later(0.5, () => say(server, '자기야!!!', 1.6, true));
+  if (server.job || server.jobs.length) return;
+  roam = null;
+  date = null;
+  server.action = null;
+  server.chatTable = null;
+  server.frozenUntil = simT + 14;
+  server.faceMood = 'sad';
+  server.speed = 3.6;
+  server.walkTo(planPath(server.pos, DATE_SPOT, W.obstacles));
+  // 도착할 즈음 운다
+  const arrive = Math.min(4, Math.hypot(server.pos.x - DATE_SPOT.x, server.pos.z - DATE_SPOT.z) / 3.0 + 0.4);
+  later(arrive, () => {
+    server.speed = 2.2;
+    server.targetYaw = Math.atan2(bartender.pos.x - server.pos.x, bartender.pos.z - server.pos.z);
+    if (!server.action && server.state === 'stand') server.do('hurt');
+    say(server, '흐엉 그만해요!! 우리 자기 때리지 마!!', 2.2, true);
+  });
+  later(6, () => server.faceMood === 'sad' && (server.faceMood = null));
+}
+// 바를 넘어 들어가 사장님과 뒤엉켜 싸운다. 사장님에게 내던져진 뒤 쫓겨난다
+let brawl = null;
+const cloud = new THREE.Group();
+for (let i = 0; i < 12; i++) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(rnd(0.25, 0.45), 12, 10), new THREE.MeshBasicMaterial({ color: 0xf2ece2, transparent: true, opacity: 0.88, depthWrite: false }));
+  m.userData.ph = Math.random() * 10;
+  cloud.add(m);
+}
+cloud.visible = false;
+scene.add(cloud);
+const BAR_IN = { x: BAR_HOME.x + 0.75, z: BAR_HOME.z };
+const BAR_OUT = { x: BAR_HOME.x + 0.75, z: BAR_FRONT_Z + 0.15 };
+
+function startBeat() {
+  if (bossBusy() || bartender.state !== 'stand') return toast('사장님이 바빠 보여요. 조금 이따가...');
+  stats.jin++;
+  me.jinLv = 0;
+  me.locked = true;
+  me.lockedAt = simT;
+  send('beat');
+  beatBoss(me);
+}
+
+function beatBoss(p) {
+  brawl = { p, phase: 'go', until: simT + 12 };
+  if (p === me) goTo(BAR_OUT);
+  else walkPeer(p, BAR_OUT);
+  say(p, pick(['사장 나와!! 한판 붙자!!', '오늘 끝장 보자!!']), 2, true);
+}
+
+function brawlUpdate(dt) {
+  const B = brawl;
+  if (!B) return;
+  const p = B.p;
+  const b = bartender;
+  if (!people.includes(p)) {
+    brawl = null;
+    cloud.visible = false;
+    return;
+  }
+  if (B.phase === 'go') {
+    const near = Math.hypot(p.pos.x - BAR_OUT.x, p.pos.z - BAR_OUT.z) < 0.5;
+    if ((near && p.state === 'stand') || simT > B.until) {
+      if (!near) p.root.position.set(BAR_OUT.x, 0, BAR_OUT.z);
+      if (p.seat) p.standUp();
+      p.path = [];
+      p.hopTo(BAR_OUT.x, COUNTER.y, COUNTER.z, 0.45, 0.8);
+      B.phase = 'up';
+      say(b, '어? 어어?!', 1.2);
+      b.targetYaw = Math.atan2(p.pos.x - b.pos.x, p.pos.z - b.pos.z);
+    }
+  } else if (B.phase === 'up' && p.state === 'stand') {
+    p.hopTo(BAR_IN.x, BAR_HOME.y, BAR_IN.z, 0.45, 0.6);
+    B.phase = 'down';
+  } else if (B.phase === 'down' && p.state === 'stand') {
+    p.targetYaw = Math.atan2(b.pos.x - p.pos.x, b.pos.z - p.pos.z);
+    b.targetYaw = Math.atan2(p.pos.x - b.pos.x, p.pos.z - b.pos.z);
+    b.action = null;
+    p.do('brawl');
+    b.do('brawl');
+    b.faceMood = 'angry';
+    cloud.visible = true;
+    sound.brawl(2.4);
+    say(p, '퍽! 퍽! 퍽!!', 2.4, true);
+    pungsunRunsOver();
+    npcs.slice(0, 4).forEach((q, i) => later(0.6 + i * 0.3, () => say(q, pick(['헐 싸운다!!', '말려 말려!!', '대박...']), 1.6)));
+    B.phase = 'fight';
+    B.until = simT + 2.6;
+    B.spark = 0;
+  } else if (B.phase === 'fight') {
+    // 뿌연 싸움 구름이 들썩인다
+    const mx = (p.pos.x + b.pos.x) / 2;
+    const mz = (p.pos.z + b.pos.z) / 2;
+    cloud.position.set(mx, 0.75, mz);
+    cloud.children.forEach((m, i) => {
+      const a = simT * 9 + m.userData.ph;
+      m.position.set(Math.cos(a + i) * 0.45, Math.sin(a * 1.3 + i) * 0.35 + 0.1, Math.sin(a + i * 2) * 0.35);
+      m.scale.setScalar(0.85 + Math.sin(a * 2) * 0.2);
+    });
+    B.spark -= dt;
+    if (B.spark <= 0) {
+      B.spark = 0.3;
+      W.sparkle(new THREE.Vector3(mx + rnd(-0.4, 0.4), 1.4, mz));
+    }
+    if (simT >= B.until) {
+      cloud.visible = false;
+      b.setPlaster(true);
+      later(90, () => b.setPlaster(false));
+      b.faceMood = 'fury';
+      b.do('rage');
+      say(b, '...이 손님이!!!', 1.8, true);
+      // 바 너머로 내던져진다
+      p.faceMood = 'sad';
+      p.hopTo(BAR_IN.x, COUNTER.y, COUNTER.z, 0.4, 1.0, false);
+      B.phase = 'toss1';
+    }
+  } else if (B.phase === 'toss1' && p.state === 'stand') {
+    p.hopTo(BAR_OUT.x, 0, BAR_OUT.z + 0.4, 0.45, 0.6, false);
+    B.phase = 'toss2';
+  } else if (B.phase === 'toss2' && p.state === 'stand') {
+    brawl = null;
+    p.baseY = 0;
+    say(p, '아이고...', 1.4);
+    comfortDue = true;
+    setBossMood(boss.mood - 50);
+    requestKick(p);
+  }
+}
+
+// ---------- 어묵탕 ----------
+// 테이블 가운데 통에서 자리에 앉은 채로 떠 먹는다. 2분 안에 세 번 넘게 먹으면 사장님이 와서 손바닥을 내밀며 "그만 드시죠."
+const EOMUK_LINES = ['후루룩~ 캬 국물 좋다', '어묵 최고!', '하나만 더 먹어야지~'];
+const EOMUK_REPLY = ['아... 국물이 너무 맛있어서요...', '한 그릇만 더...', '네... 죄송합니다...'];
+const EOMUK_LIMIT = 3;
+const EOMUK_WINDOW = 120;
+
+function goEomuk() {
+  if (blocked() || needSeat()) return;
+  if (me.eomuk || me.action) return;
+  send('eomuk');
+  runEomuk(me);
+}
+
+function runEomuk(p) {
+  p.eomuk = { phase: 'ladle', t: simT + 1.6, until: simT + 8 };
+  p.action = null;
+  p.do('ladle');
+}
+
+// 손님(NPC)도 가끔 떠 먹는다. 횟수는 세지 않는다
+function npcEomuk(p) {
+  p.do('ladle');
+  later(1.6, () => {
+    if (!p.seat || p.action) return;
+    p.do('sip');
+    if (Math.random() < 0.4) say(p, pick(EOMUK_LINES), 1.8);
+  });
+}
+
+function eomukUpdate() {
+  for (const p of people) {
+    const E = p.eomuk;
+    if (!E) continue;
+    if (simT > E.until || p.kickedOut || p.wc) {
+      p.eomuk = null;
+      continue;
+    }
+    if (E.phase === 'ladle' && simT >= E.t) {
+      p.do('sip');
+      sound.slurp();
+      p.eomukTotal = (p.eomukTotal || 0) + 1;
+      say(p, EOMUK_LINES[(p.eomukTotal - 1) % EOMUK_LINES.length], 2);
+      E.phase = 'sip';
+      E.t = simT + 1.8;
+    } else if (E.phase === 'sip' && simT >= E.t) {
+      p.eomuk = null;
+      if (p === me) stats.eomuk++;
+      p.eomukTimes = (p.eomukTimes || []).filter((t) => simT - t < EOMUK_WINDOW);
+      p.eomukTimes.push(simT);
+      if (p.eomukTimes.length >= EOMUK_LIMIT) {
+        p.eomukTimes = [];
+        stopEating(p);
+      }
+    }
+  }
+}
+
+function stopEating(p) {
+  setBossMood(boss.mood - 15);
+  if (bossBusy() || bartender.state !== 'stand') {
+    bossGrumble(p, '손님, 어묵탕 그만 드시죠.', 'serious', 'warn', true);
+    return;
+  }
+  kick = { target: p, phase: 'wait', mode: 'eomuk' };
+}
+
+// ---------- 테니스장 ----------
+let tennisOn = false;
+let tennisWin = null;
+const tennis = createTennis({
+  scene,
+  court: W.court,
+  sound,
+  playerOpts: { ...lookFromIdx(myLookIdx) },
+  cpuOpts: { ...PUNGSUN_OPTS },
+  ui: {
+    score: (t) => ($('#tnScore').textContent = t),
+    msg: (t) => ($('#tnMsg').textContent = t),
+    hint: (t) => ($('#tnHint').textContent = t),
+    over: (win) => {
+      tennisWin = win;
+      $('#tnOver').hidden = false;
+      $('#tnOverTitle').textContent = win ? '승리! 풍순이를 이겼어요' : '패배... 벌칙은 원샷!';
+      $('#tnSwing').hidden = true;
+      if (win) stats.tennis++;
+    },
+  },
+});
+
+function fade(fn) {
+  const f = $('#fade');
+  f.classList.add('on');
+  setTimeout(() => {
+    fn();
+    f.classList.remove('on');
+  }, 450);
+}
+
+function enterTennis() {
+  if (blocked() || tennisOn) return;
+  $('#menuSheet').classList.remove('show');
+  fade(() => {
+    tennisOn = true;
+    tennisWin = null;
+    if (me.seat) me.standUp();
+    me.path = [];
+    me.state = 'stand';
+    me.root.position.set(EXIT.x, 0, EXIT.z);
+    me.root.visible = false;
+    me.locked = true;
+    me.lockedAt = simT;
+    endNausea();
+    send('tennis', { on: true });
+    document.body.classList.add('tennis');
+    controls.enabled = false;
+    camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+    viewOffY = -1;
+    tennis.setLook(lookFromIdx(myLookIdx));
+    $('#tnOver').hidden = true;
+    $('#tnSwing').hidden = false;
+    tennis.start();
+  });
+}
+
+function leaveTennis() {
+  fade(() => {
+    tennisOn = false;
+    tennis.stop();
+    document.body.classList.remove('tennis');
+    controls.enabled = true;
+    me.root.visible = true;
+    me.locked = false;
+    me.targetYaw = Math.PI;
+    send('tennis', { on: false });
+    controls.target.set(me.pos.x, 0.5, me.pos.z);
+    lastTarget.copy(controls.target);
+    camera.position.copy(controls.target).add(CAM_OFFSET);
+    updateViewOffset();
+    if (tennisWin === false) {
+      later(0.8, () => {
+        meSay('벌칙주 원샷!', 2);
+        me.do('oneshot');
+        send('act', { a: 'oneshot' });
+        later(0.55, () => sound.gulp());
+      });
+    } else if (tennisWin) later(0.8, () => meSay('테니스 이기고 왔다~!', 2));
+  });
+}
+
+function setPeerTennis(p, on) {
+  p.tennis = on;
+  p.root.visible = !on;
+  if (p.tagEl) p.tagEl.style.display = on ? 'none' : '';
+  if (on) {
+    if (p.seat) {
+      p.seat.occupant = null;
+      p.seat = null;
+    }
+    p.path = [];
+    p.state = 'stand';
+    p.root.position.set(EXIT.x, 0, EXIT.z);
+    logSystem(`${p.name}님이 테니스 치러 갔어요`);
+  } else logSystem(`${p.name}님이 테니스장에서 돌아왔어요`);
+}
+
+// 테니스 중 카메라. 내 뒤 위쪽에서 코트를 내려다본다
+function tennisCamera() {
+  const C = W.court.c;
+  camera.position.set(C.x, 8.6, C.z + 12.8);
+  camera.lookAt(C.x, 0, C.z - 0.6);
+}
+
+$('#tnSwing').addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  tennis.swing();
+});
+$('#tnLeave').onclick = leaveTennis;
+$('#tnBack').onclick = leaveTennis;
+$('#tnAgain').onclick = () => {
+  tennisWin = null;
+  $('#tnOver').hidden = true;
+  $('#tnSwing').hidden = false;
+  tennis.start();
+};
+$('#menuTennis').onclick = enterTennis;
+$('#menuEomuk').onclick = () => {
+  $('#menuSheet').classList.remove('show');
+  goEomuk();
+};
+window.addEventListener('keydown', (e) => {
+  if (!tennisOn || e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space' || e.code === 'Enter') {
+    e.preventDefault();
+    tennis.swing();
+  }
+});
+
 // 사장님 기분은 조금씩 회복된다
 let regenAcc = 0;
 let regenTick = 0;
@@ -2381,6 +3385,41 @@ function bossRegen(dt) {
 
 let simT = 0;
 let camFollow = true;
+let viewTick = 0;
+let offscreenFor = 0;
+const NARROW = () => app.clientWidth < 700 || app.clientWidth < app.clientHeight;
+const projV = new THREE.Vector3();
+
+// 내 캐릭터가 가려지지 않은 화면 안에 있는지
+function meOffscreen() {
+  if (!camFollow || $('#intro') && !$('#intro').classList.contains('hide')) return false;
+  projV.set(me.pos.x, me.pos.y + 0.8, me.pos.z).project(camera);
+  if (projV.z > 1) return true;
+  const y = (-projV.y * 0.5 + 0.5) * app.clientHeight;
+  return Math.abs(projV.x) > 0.95 || y < visTop - 30 || y > visBottom - 10;
+}
+
+// 나를 가운데 두고 따라가는 중인지. 화면 밖으로 나가면 켜지고, 반만 따라가도 넉넉히 보일 때 꺼진다
+// 바로 끄면 두 방식이 번갈아 바뀌며 화면이 떨린다
+let fullFollow = false;
+const halfGoal = new THREE.Vector3();
+const testCam = camera.clone();
+function fitsHalfFollow() {
+  halfGoal.set(me.pos.x * 0.5, 0.5, me.pos.z * 0.4 - 1.4);
+  testCam.copy(camera);
+  testCam.position.copy(camera.position).sub(controls.target).add(halfGoal);
+  testCam.updateMatrixWorld();
+  projV.set(me.pos.x, me.pos.y + 0.8, me.pos.z).project(testCam);
+  if (projV.z > 1) return false;
+  const y = (-projV.y * 0.5 + 0.5) * app.clientHeight;
+  return Math.abs(projV.x) < 0.8 && y > visTop + 40 && y < visBottom - 60;
+}
+
+// 기본 시점에서 많이 벗어났는지
+function camOffDefault() {
+  const off = camera.position.clone().sub(controls.target);
+  return off.angleTo(CAM_OFFSET) > 0.12 || Math.abs(off.length() - CAM_OFFSET.length()) > 1.5;
+}
 function tick(dt) {
   simT += dt;
   const t = simT;
@@ -2407,6 +3446,12 @@ function tick(dt) {
   games.update();
   gameWatchdog();
   nauseaUpdate();
+  attackUpdate();
+  brawlUpdate(dt);
+  eomukUpdate();
+  kickChoiceUpdate();
+  knockoutUpdate(dt);
+  if (tennisOn) tennis.update(dt);
   for (const p of people) p.update(dt, p === bartender || p.noClip ? null : W.obstacles, p === bartender ? null : p === me || p.remote ? ME_BOUNDS : W.bounds);
   W.update(dt, t);
 
@@ -2422,11 +3467,23 @@ function tick(dt) {
     }
   }
 
-  // 카메라가 나를 천천히 따라온다
-  camGoal.set(me.pos.x * 0.5, 0.5, me.pos.z * 0.4 - 1.4);
+  if (tennisOn) return tennisCamera();
+  // 카메라가 나를 천천히 따라온다. 좁은 화면이나 내가 화면 밖으로 나가면 나를 가운데에 둔다
+  if (++viewTick % 20 === 0) updateViewOffset();
+  const offscreen = meOffscreen();
+  offscreenFor = offscreen ? offscreenFor + dt : 0;
+  if (offscreenFor > 1.2 && !camTouching) camReset = true;
+  if (offscreen) fullFollow = true;
+  else if (fullFollow && fitsHalfFollow()) fullFollow = false;
+  if (NARROW() || fullFollow) camGoal.set(me.pos.x, 0.5, me.pos.z);
+  else camGoal.set(me.pos.x * 0.5, 0.5, me.pos.z * 0.4 - 1.4);
+  if (TOUCH_UI && !camTouching && !camReset && camTouchedAt && performance.now() - camTouchedAt > 8000 && camOffDefault()) {
+    camTouchedAt = 0;
+    camReset = true;
+  }
   if (camReset) {
     const off = camera.position.clone().sub(controls.target);
-    const want = CAM_OFFSET.clone().normalize().multiplyScalar(CAM_OFFSET.length());
+    const want = CAM_OFFSET.clone();
     off.lerp(want, 1 - Math.exp(-dt * 4));
     camera.position.copy(controls.target).add(off);
     if (off.distanceTo(want) < 0.05) camReset = false;
@@ -2483,4 +3540,4 @@ if (document.fonts && document.fonts.load) {
 }
 
 // 확인용. 주소에 ?debug 를 붙였을 때만 연다
-if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => server.jobs.push({ table: me.seat.table, kind }), startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };
+if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => server.jobs.push({ table: me.seat.table, kind }), startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };

@@ -1,5 +1,6 @@
 // 오늘의 칭호. 기록(stats)으로 칭호를 정한다
-// stats: shots 원샷, jin 진상, kick 쫓겨남, wc 화장실, puke 바닥에 토함, lost 술게임 짐, chat 수다, flex 쏜 금액, order 주문
+// stats: shots 원샷, jin 진상, kick 쫓겨남, wc 화장실, puke 바닥에 토함, lost 술게임 짐, chat 수다, flex 쏜 금액, order 주문,
+//        eomuk 어묵탕, tennis 테니스 이김, hold 버티기, ko 사장님 쓰러뜨림
 
 export const STAT_LABELS = [
   ['shots', '원샷', '잔'],
@@ -11,15 +12,23 @@ export const STAT_LABELS = [
   ['puke', '바닥 테러', '번'],
   ['lost', '술게임 패배', '번'],
   ['flex', '쏜 금액', '원'],
+  ['eomuk', '어묵탕', '그릇'],
+  ['tennis', '테니스 승리', '번'],
+  ['hold', '버티기', '번'],
+  ['ko', '사장님 KO', '번'],
 ];
 
 // 혼자 받는 칭호. 위에서부터 먼저 맞는 것
 const SOLO = [
   [(s) => s.puke >= 1, '바닥 테러리스트', '가게 바닥에 흔적을 남겼어요'],
   [(s) => s.kick >= 2, '전설의 진상왕', '두 번 넘게 쫓겨났어요'],
+  [(s) => s.ko >= 1, '풍속의 주먹', '사장님을 쓰러뜨렸어요'],
+  [(s) => s.hold >= 1, '철면피', '나가라는데 안 나갔어요'],
   [(s) => s.jin >= 3 || s.kick >= 1, '오늘의 진상왕', '사장님 혈압 담당'],
   [(s) => s.flex >= 50000, '플렉스 장인', '오늘은 내가 쏜다!'],
   [(s) => s.shots >= 12, '원샷왕', '간이 튼튼해요'],
+  [(s) => s.eomuk >= 4, '어묵탕 도둑', '국물이 너무 맛있었어요'],
+  [(s) => s.tennis >= 1, '테니스 왕자', '풍순이를 이겼어요'],
   [(s) => s.wc >= 3, '화장실 VIP', '자리보다 화장실에 더 오래'],
   [(s) => s.lost >= 3, '술게임 호구', '걸리는 건 다 내 몫'],
   [(s) => s.chat >= 15, '수다왕', '입이 쉬질 않아요'],
@@ -42,6 +51,10 @@ const BEST = [
   ['lost', '술게임 호구'],
   ['chat', '수다왕'],
   ['order', '먹방 요정'],
+  ['eomuk', '어묵탕 도둑'],
+  ['tennis', '테니스 왕자'],
+  ['hold', '철면피'],
+  ['ko', '풍속의 주먹'],
 ];
 
 export function roomTitles(list) {
@@ -59,7 +72,7 @@ export function roomTitles(list) {
 }
 
 export function emptyStats() {
-  return { shots: 0, order: 0, chat: 0, jin: 0, kick: 0, wc: 0, puke: 0, lost: 0, flex: 0 };
+  return { shots: 0, order: 0, chat: 0, jin: 0, kick: 0, wc: 0, puke: 0, lost: 0, flex: 0, eomuk: 0, tennis: 0, hold: 0, ko: 0 };
 }
 
 // 같이 놀 때 짧게 주고받는 형태

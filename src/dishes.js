@@ -93,6 +93,27 @@ export function makeDish(kind) {
     mayo.position.y = 0.085;
     g.add(mayo);
   }
+  if (kind === 'refill') {
+    // 오뎅 리필. 스테인리스 그릇에 꼬치가 한가득
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.09, 24), m('steel', 0xb8b8b8, { metalness: 0.6, roughness: 0.4 }));
+    bowl.position.y = 0.045;
+    g.add(bowl);
+    const soup = new THREE.Mesh(new THREE.CircleGeometry(0.16, 24), m('oden', 0xa8642a, { roughness: 0.4, emissive: 0x2a1000 }));
+    soup.rotation.x = -Math.PI / 2;
+    soup.position.y = 0.085;
+    g.add(soup);
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.3, 5), m('stick', 0xd9c49a, { roughness: 0.9 }));
+      stick.position.set(Math.cos(a) * 0.07, 0.2, Math.sin(a) * 0.07);
+      stick.rotation.set(Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35);
+      const cake = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.022), m('fishcake', 0xe8b06a, { roughness: 0.8 }));
+      cake.position.y = -0.08;
+      stick.add(cake);
+      g.add(stick);
+    }
+    g.userData.steam = 0.1;
+  }
   return mergeStatic(g);
 }
 
@@ -109,8 +130,13 @@ function bottle(color) {
   return mergeStatic(g);
 }
 
-// 테이블 가운데 네 칸. 꽉 차면 가장 오래된 것을 치운다
-const SLOTS = [-0.62, -0.2, 0.22, 0.64];
+// 어묵탕 통을 피해 네 칸. 양 끝 두 칸, 통 앞뒤 두 칸. 꽉 차면 가장 오래된 것을 치운다
+const SLOTS = [
+  { x: -0.78, z: 0 },
+  { x: 0.78, z: 0 },
+  { x: -0.32, z: 0.35 },
+  { x: 0.32, z: -0.35 },
+];
 
 export function placeDish(W, scene, table, kind) {
   if (table.dishes.length >= SLOTS.length) {
@@ -121,8 +147,10 @@ export function placeDish(W, scene, table, kind) {
   const used = new Set(table.dishes.map((d) => d.slot));
   const slot = SLOTS.findIndex((_, i) => !used.has(i));
   const g = makeDish(kind);
-  g.position.set(table.x + SLOTS[slot], TABLE_H, table.z + rnd(-0.08, 0.08));
+  g.position.set(table.x + SLOTS[slot].x, TABLE_H, table.z + SLOTS[slot].z);
   g.rotation.y = Math.random() * 6;
+  // 좁아진 자리에 맞춰 조금 작게
+  g.scale.setScalar(0.88);
   scene.add(g);
   const d = { group: g, slot, kind, pot: null };
   if (g.userData.steam) {
@@ -136,7 +164,8 @@ export function placeDish(W, scene, table, kind) {
 export function placeBottles(scene, table, n) {
   for (let i = 0; i < n; i++) {
     const b = bottle(i % 3 === 2 ? 0x7a4a1c : 0x2f8a4a);
-    b.position.set(table.x + rnd(-0.85, 0.85), TABLE_H, table.z + (Math.random() < 0.5 ? -0.38 : 0.38));
+    // 안주 칸을 피해 통 옆 가장자리에 둔다
+    b.position.set(table.x + (Math.random() < 0.5 ? -1 : 1) * rnd(0.55, 0.92), TABLE_H, table.z + (Math.random() < 0.5 ? -0.45 : 0.45));
     scene.add(b);
   }
 }

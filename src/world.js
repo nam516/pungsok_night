@@ -118,6 +118,43 @@ function signTexture() {
   });
 }
 
+// 글자 표지판. 어두운 나무판에 밝은 글씨
+function boardTexture(text, w = 256, h = 96, size = 40) {
+  return canvasTex(w, h, (g) => {
+    g.fillStyle = '#2a1c12';
+    g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#c49a62';
+    g.lineWidth = 4;
+    g.strokeRect(4, 4, w - 8, h - 8);
+    g.fillStyle = '#ffe1b8';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = `700 ${size}px "Gowun Dodum", sans-serif`;
+    g.fillText(text, w / 2, h / 2 + 2);
+  });
+}
+
+// 테니스 네트 무늬
+function netTexture() {
+  return canvasTex(256, 32, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(240,240,240,0.85)';
+    g.lineWidth = 1.5;
+    for (let x = 0; x <= w; x += 6) {
+      g.beginPath();
+      g.moveTo(x, 0);
+      g.lineTo(x, h);
+      g.stroke();
+    }
+    for (let y = 0; y <= h; y += 6) {
+      g.beginPath();
+      g.moveTo(0, y);
+      g.lineTo(w, y);
+      g.stroke();
+    }
+  }, [6, 1]);
+}
+
 // 화장실 문 위 표지판
 function wcSignTexture() {
   return canvasTex(256, 96, (g, w, h) => {
@@ -356,6 +393,18 @@ export function buildWorld(scene) {
   const shadeM = new THREE.MeshLambertMaterial({ color: 0xc49a62, side: THREE.DoubleSide, emissive: 0x7a4a1a, emissiveIntensity: 0.4 });
   const bulbM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc27a).multiplyScalar(4) });
   const cordM = new THREE.MeshBasicMaterial({ color: 0x1a1410 });
+  // 어묵탕 통 재료
+  const troughM = std(0xb8b8b8, { metalness: 0.6, roughness: 0.4 });
+  const brothM = std(0xa8642a, { roughness: 0.4, emissive: 0x2a1000 });
+  const fishM = std(0xe8b06a, { roughness: 0.8 });
+  const fishDarkM = std(0xc98a46, { roughness: 0.85 });
+  const stickM = std(0xd9c49a, { roughness: 0.9 });
+  const radishM = std(0xf1e2c0, { roughness: 0.7 });
+  const skewerGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.34, 5);
+  const fishBallGeo = new THREE.SphereGeometry(0.035, 10, 8);
+  const fishTubeGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10);
+  const fishFlatGeo = new THREE.BoxGeometry(0.09, 0.12, 0.025);
+  const radishGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.03, 14);
 
   const layout = [
     [-6, -1.6], [0, -1.6], [6, -1.6],
@@ -404,6 +453,50 @@ export function buildWorld(scene) {
     }
 
     W.obstacles.push({ x0: tx - 1.0 - 0.28, x1: tx + 1.0 + 0.28, z0: tz - 0.55 - 0.28, z1: tz + 0.55 + 0.28 });
+
+    // 가운데 박힌 어묵탕 통. 칸막이 세 칸에 꼬치가 비스듬히 꽂혀 있다
+    {
+      const y = TABLE_H;
+      const rims = [[0, -0.16, 1.06, 0.03], [0, 0.16, 1.06, 0.03], [-0.515, 0, 0.03, 0.35], [0.515, 0, 0.03, 0.35], [-0.17, 0, 0.02, 0.3], [0.17, 0, 0.02, 0.3]];
+      for (const [rx, rz, w, d] of rims) {
+        const r = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, d), troughM);
+        r.position.set(tx + rx, y + 0.015, tz + rz);
+        tg.add(r);
+      }
+      const broth = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.3), brothM);
+      broth.rotation.x = -Math.PI / 2;
+      broth.position.set(tx, y + 0.025, tz);
+      tg.add(broth);
+      for (let i = 0; i < 12; i++) {
+        const cx = -0.34 + (i % 3) * 0.34 + rnd(-0.07, 0.07);
+        const cz = (((i / 3) | 0) - 1.5) * 0.065;
+        const lean = (i % 2 ? 1 : -1) * rnd(0.25, 0.45);
+        const st = new THREE.Group();
+        const stick = new THREE.Mesh(skewerGeo, stickM);
+        stick.position.y = 0.17;
+        const kind = i % 4;
+        const cake = new THREE.Mesh(kind === 0 ? fishBallGeo : kind === 1 ? fishTubeGeo : fishFlatGeo, kind === 2 ? fishDarkM : fishM);
+        cake.position.y = 0.05;
+        st.add(stick, cake);
+        st.position.set(tx + cx, y + 0.01, tz + cz);
+        st.rotation.set(lean * 0.5, rnd(0, 6), lean);
+        tg.add(st);
+      }
+      // 무 한 조각씩
+      for (const rx of [-0.36, 0.02, 0.38]) {
+        const radish = new THREE.Mesh(radishGeo, radishM);
+        radish.position.set(tx + rx, y + 0.03, tz + rnd(-0.06, 0.06));
+        tg.add(radish);
+      }
+      const pick = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.4, 0.42), new THREE.MeshBasicMaterial());
+      pick.position.set(tx, y + 0.18, tz);
+      pick.visible = false;
+      pick.userData.eomukTable = T;
+      scene.add(pick);
+      W.pickables.push(pick);
+      T.pot = { x: tx, y: y + 0.08, z: tz, acc: Math.random() * 0.14, boost: 0 };
+      W.pots.push(T.pot);
+    }
 
     // 펜던트 조명
     const lamp = new THREE.Group();
@@ -525,6 +618,80 @@ export function buildWorld(scene) {
     };
   }
 
+  // 테니스장. 가게와 멀리 떨어진 곳(안개에 가려 보이지 않는 거리)에 있다
+  {
+    const C = new THREE.Vector3(0, 0, 80);
+    const HWc = 3, HLc = 6;
+    const group = new THREE.Group();
+    group.position.copy(C);
+    scene.add(group);
+    const plane = (w, d, color, y = 0) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), std(color, { roughness: 0.95 }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = y;
+      m.receiveShadow = true;
+      group.add(m);
+      return m;
+    };
+    plane(20, 26, 0x2f5a3c, -0.01);
+    plane(HWc * 2 + 1.6, HLc * 2 + 2.4, 0x2f5d8a, 0);
+    const lineM = new THREE.MeshBasicMaterial({ color: 0xf2f2f2 });
+    const line = (x0, z0, x1, z1) => {
+      const w = Math.max(0.06, Math.abs(x1 - x0));
+      const d = Math.max(0.06, Math.abs(z1 - z0));
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), lineM);
+      m.rotation.x = -Math.PI / 2;
+      m.position.set((x0 + x1) / 2, 0.005, (z0 + z1) / 2);
+      group.add(m);
+    };
+    line(-HWc, -HLc, HWc, -HLc);
+    line(-HWc, HLc, HWc, HLc);
+    line(-HWc, -HLc, -HWc, HLc);
+    line(HWc, -HLc, HWc, HLc);
+    line(-HWc, -3.3, HWc, -3.3);
+    line(-HWc, 3.3, HWc, 3.3);
+    line(0, -3.3, 0, 3.3);
+    // 네트
+    const postM = std(0x222222, { roughness: 0.5 });
+    for (const sx of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.62, 8), postM);
+      post.position.set(sx * (HWc + 0.35), 0.31, 0);
+      group.add(post);
+    }
+    const net = new THREE.Mesh(new THREE.PlaneGeometry(HWc * 2 + 0.7, 0.5), new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    net.position.y = 0.3;
+    group.add(net);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(HWc * 2 + 0.7, 0.06, 0.02), lineM);
+    band.position.y = 0.56;
+    group.add(band);
+    // 철망 울타리
+    const fenceM = new THREE.LineBasicMaterial({ color: 0x3a4a3a });
+    const pts = [];
+    const FX = 6.5, FZ = 10;
+    for (let x = -FX; x <= FX; x += 0.8) pts.push(x, 0, -FZ, x, 2.6, -FZ, x, 0, FZ, x, 2.6, FZ);
+    for (let z = -FZ; z <= FZ; z += 0.8) pts.push(-FX, 0, z, -FX, 2.6, z, FX, 0, z, FX, 2.6, z);
+    for (const y of [0.9, 1.8, 2.6]) pts.push(-FX, y, -FZ, FX, y, -FZ, -FX, y, FZ, FX, y, FZ, -FX, y, -FZ, -FX, y, FZ, FX, y, -FZ, FX, y, FZ);
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    group.add(new THREE.LineSegments(fg, fenceM));
+    // 조명탑
+    const lampM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff2d0).multiplyScalar(3) });
+    for (const [x, z] of [[-FX, -FZ * 0.5], [FX, -FZ * 0.5], [-FX, FZ * 0.5], [FX, FZ * 0.5]]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 6, 8), postM);
+      pole.position.set(x, 3, z);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.3), lampM);
+      head.position.set(x * 0.95, 6, z);
+      group.add(pole, head);
+      const pl = new THREE.PointLight(0xfff0d8, 30, 40, 1.2);
+      pl.position.set(x * 0.8, 5.5, z);
+      group.add(pl);
+    }
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), new THREE.MeshBasicMaterial({ map: boardTexture('풍속 테니스장', 400, 100, 44) }));
+    sign.position.set(0, 2.1, -FZ + 0.05);
+    group.add(sign);
+    W.court = { c: C, hw: HWc, hl: HLc };
+  }
+
   // 구석 화분
   const potM = std(0x8a5a3a, { roughness: 0.9 });
   const bigLeaf = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 });
@@ -566,7 +733,7 @@ export function buildWorld(scene) {
   }
 
   // 김, 반짝임
-  const steam = new Particles(160, { additive: false });
+  const steam = new Particles(260, { additive: false });
   scene.add(steam.points);
   const sparks = new Particles(320, { additive: true, gravity: -2.2 });
   scene.add(sparks.points);
@@ -618,7 +785,9 @@ export function buildWorld(scene) {
 
     for (const pot of W.pots) {
       pot.acc += dt;
-      if (pot.acc > 0.14) {
+      // 리필하면 잠깐 김이 확 오른다
+      if (pot.boost > 0) pot.boost -= dt;
+      if (pot.acc > (pot.boost > 0 ? 0.03 : 0.14)) {
         pot.acc = 0;
         steam.emit(pot.x + rnd(-0.1, 0.1), pot.y, pot.z + rnd(-0.1, 0.1), rnd(-0.05, 0.05), rnd(0.25, 0.45), rnd(-0.05, 0.05), rnd(1.4, 2.2), rnd(10, 17), 1, 1, 1, 0.07);
       }

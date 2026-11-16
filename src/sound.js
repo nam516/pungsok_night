@@ -492,6 +492,70 @@ export function createSound() {
       const t = ctx.currentTime;
       for (let i = 0; i < 2; i++) noiseBurst(t + i * 0.18, 0.08, 'bandpass', 380, 3, 0.8);
     },
+    // 테니스공 치는 소리. 짧고 단단하게 퉁
+    thwack(strong = false) {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      noiseBurst(t, 0.06, 'bandpass', strong ? 1800 : 1300, 2, strong ? 0.9 : 0.6);
+      const o = ctx.createOscillator();
+      o.frequency.setValueAtTime(strong ? 420 : 340, t);
+      o.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.3, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      o.connect(g).connect(fxBus);
+      o.start(t);
+      o.stop(t + 0.12);
+    },
+    // 공이 바닥에 튀는 소리
+    bounce() {
+      if (!ready()) return;
+      noiseBurst(ctx.currentTime, 0.05, 'lowpass', 700, 1, 0.35);
+    },
+    // 철썩
+    slap() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      noiseBurst(t, 0.09, 'highpass', 1800, 0.8, 1.0);
+      noiseBurst(t, 0.05, 'bandpass', 900, 1.5, 0.6);
+    },
+    // 퍽퍽. 싸울 때 여러 번
+    brawl(sec = 2.4) {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      for (let k = 0; k < sec / 0.17; k++) {
+        const s = t + k * 0.17 + Math.random() * 0.06;
+        noiseBurst(s, 0.08, 'lowpass', 500 + Math.random() * 400, 1, 0.7);
+        const o = ctx.createOscillator();
+        o.frequency.setValueAtTime(160 + Math.random() * 60, s);
+        o.frequency.exponentialRampToValueAtTime(60, s + 0.1);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.35, s);
+        g.gain.exponentialRampToValueAtTime(0.001, s + 0.12);
+        o.connect(g).connect(fxBus);
+        o.start(s);
+        o.stop(s + 0.14);
+      }
+    },
+    // 후루룩
+    slurp() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 4;
+      bp.frequency.setValueAtTime(900, t);
+      bp.frequency.linearRampToValueAtTime(2600, t + 0.6);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.5, t + 0.1);
+      g.gain.linearRampToValueAtTime(0, t + 0.7);
+      src.connect(bp).connect(g).connect(fxBus);
+      src.start(t, Math.random() * 2);
+      src.stop(t + 0.75);
+    },
     // 쪽. 짧게 올라가는 소리
     smooch() {
       if (!ready()) return;
