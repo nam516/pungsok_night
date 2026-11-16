@@ -13,6 +13,9 @@ import { createSound } from './sound.js';
 import { planPath } from './path.js';
 import { pushOut } from './person.js';
 import { createNet } from './net.js';
+import { LOOK_OPTS, lookFromIdx, encodeLook, decodeLook, defaultLookIdx } from './looks.js';
+import { STAT_LABELS, emptyStats, soloTitle, roomTitles, packStats, unpackStats } from './titles.js';
+import { GAMES, createGames } from './games.js';
 
 const $ = (s) => document.querySelector(s);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -73,6 +76,12 @@ const W = buildWorld(scene);
 const ME_BOUNDS = { ...W.bounds, z1: 8.6 };
 const sound = createSound();
 
+// 테이블별 계산서. 주문한 안주 수와 원샷 잔 수를 모은다
+for (const T of W.tables) T.bill = { items: {}, shots: 0 };
+const PRICE = { jeon: 18900, jeongol: 22900, chicken: 21900, shrimp: 16900 };
+const SOJU_PRICE = 5000;
+const SOJU_SHOTS = 7;
+
 // 손님
 const LOOKS = [
   { hair: 0x2b1d17, style: 'bob', shirt: 0xd9c6a5, pants: 0x3b4a5a },
@@ -125,20 +134,24 @@ W.tables.forEach((T, ti) => {
   }
   if (FILL[ti]) {
     const kinds = MENU.map((m) => m.kind).sort(() => Math.random() - 0.5);
-    for (let k = 0; k < 2 + (Math.random() < 0.5 ? 1 : 0); k++) placeDish(W, scene, T, kinds[k]);
+    for (let k = 0; k < 2 + (Math.random() < 0.5 ? 1 : 0); k++) {
+      placeDish(W, scene, T, kinds[k]);
+      T.bill.items[kinds[k]] = (T.bill.items[kinds[k]] || 0) + 1;
+    }
     placeBottles(scene, T, 1 + ((Math.random() * 3) | 0));
   }
 });
 
-// 같이 놀 때는 아이디로 생김새를 정해서 모두에게 같게 보인다
-function lookFor(id) {
-  let h = 0;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return LOOKS[h % LOOKS.length];
-}
+// 내 생김새. 꾸미기에서 고른 것을 기억해 두고, 처음이면 아이디로 정한다
+let myLookIdx = defaultLookIdx(MY_ID);
+try {
+  myLookIdx = decodeLook(localStorage.getItem('pungsok-look')) || myLookIdx;
+} catch (e) {}
 
 // 나
-const me = addPerson(MULTI ? { ...lookFor(MY_ID) } : { hair: 0x3a2418, style: 'bob', shirt: 0xf3d36b, pants: 0x34465a });
+const me = addPerson({ ...lookFromIdx(myLookIdx) });
+// 오늘의 기록
+const stats = emptyStats();
 me.isMe = true;
 me.root.position.set(0, 0, 6.2);
 me.yaw = me.targetYaw = Math.PI;
@@ -331,7 +344,13 @@ function onOneshot(p) {
   if (p.isMe || (me.seat && p.seat && p.seat.table === me.seat.table)) {
     sound.ahh();
   }
-  if (p.isMe) updateMeter();
+  if (p.seat) p.seat.table.bill.shots++;
+  if (p.isMe) {
+    stats.shots++;
+    updateMeter();
+    // 8잔이 넘으면 속이 뒤집힌다
+    if (me.drinks >= NAUSEA_AT && !nausea && !me.wc) startNausea();
+  }
 }
 for (const p of people) {
   p.onOneshot = onOneshot;
@@ -347,7 +366,8 @@ function npcThink(p, dt) {
   const r = Math.random();
   if (r < 0.32) {
     p.do('talk');
-    say(p, pick(CHAT));
+    // 안주가 없는 테이블에서는 음식 얘기를 하지 않는다
+    say(p, pick(p.seat.table.dishes.length ? CHAT : CHAT.filter((c) => !c.includes('맛있다'))));
     const mates = seated(p.seat.table).filter((q) => q !== p && !q.isMe && !q.remote);
     if (mates.length && Math.random() < 0.6) later(1.6, () => {
       const q = pick(mates);
@@ -372,7 +392,10 @@ function npcThink(p, dt) {
 
 // 서빙
 // 풍순이는 한가하면 테이블을 돌아다니며 손님들에게 여우 짓을 한다
-const FLIRT = ['오빠~ 한 잔 더 하실래요? 호호', '어머~ 오늘 왜 이렇게 멋있어요~', '풍순이 보러 또 와야 돼요~ 알았죠?', '언니 피부 진짜 좋다~ 호호', '이 안주 풍순이 추천이에요~ 찡긋', '나 오늘 예뻐요? 호호호'];
+// 여우 짓 대사. 테이블에 안주가 있는지에 따라 할 말이 다르다
+const FLIRT = ['오빠~ 한 잔 더 하실래요? 호호', '어머~ 오늘 왜 이렇게 멋있어요~', '풍순이 보러 또 와야 돼요~ 알았죠?', '언니 피부 진짜 좋다~ 호호', '나 오늘 예뻐요? 호호호'];
+const FLIRT_FOOD = ['안주 맛있죠~? 풍순이가 직접 날랐잖아요~ 찡긋', '이거 식기 전에 드세요~ 호호'];
+const FLIRT_NOFOOD = ['어머~ 아직 주문 안 하셨네? 풍순이가 추천해 줄까요~?', '빈속에 마시면 안 돼요~ 감자전 어때요? 호호'];
 const FLIRT_BACK = ['ㅎㅎ...네', '어, 어...', '풍순씨 오늘 왜 이래요ㅋㅋ', '한 잔 더 주세요!', '아 부끄럽네...'];
 let roam = null;
 
@@ -381,7 +404,8 @@ const decides = () => !MULTI || isHost();
 
 function pungsunIdle(dt) {
   if (roam) return roamUpdate();
-  if (!decides()) return;
+  // 술게임 진행 중에는 진행만 한다
+  if (!decides() || tableGames.size) return;
   if (server.job || server.jobs.length || server.state !== 'stand' || server.action) return;
   server.idleT = (server.idleT ?? rnd(4, 8)) - dt;
   if (server.idleT > 0) return;
@@ -419,7 +443,7 @@ function roamUpdate() {
   const R = roam;
   if (R.phase === 'go' && server.state === 'stand' && (decides() || R.pending)) {
     // 방장이 아니면 방장이 보낸 동작과 대사(pending)를 쓴다
-    const f = R.pending || { act: pick(['wink', 'aegyo', 'hairflip']), line: pick(FLIRT) };
+    const f = R.pending || { act: pick(['wink', 'aegyo', 'hairflip']), line: pick([...FLIRT, ...(R.T.dishes.length ? FLIRT_FOOD : FLIRT_NOFOOD)]) };
     R.pending = null;
     if (decides()) send('roamFlirt', f);
     server.targetYaw = Math.atan2(R.T.x - server.pos.x, 0);
@@ -537,7 +561,7 @@ function staffDo(p, act, line, dur = 2, humph = false, fromNet = false) {
   if (!fromNet) send('staff', { w: p === server ? 's' : 'b', a: act, l: line, d: dur, h: humph });
 }
 
-// 주문이 들어오면 사장님이 자기 바 위로 올라가 팔을 ㄴ 자로 흔들며 환호한다
+// 주문이 들어오면 사장님이 자기 바 위로 올라가 몸을 숙이고 엉덩이를 씰룩이며 환호한다
 const COUNTER = { y: 1.13, z: -5.75 };
 let party = null;
 const CHEER_BACK = ['사장님 최고!', '와아아~', 'ㅋㅋㅋㅋ 뭐야', '앵콜!', '예에에~'];
@@ -597,11 +621,13 @@ function setBossMood(v) {
   else if (boss.sulky && boss.mood >= 50) endSulk();
 }
 
+// 화면에는 기분 대신 짜증(100 - 기분)으로 보여 준다. 짜증이 가득 차면 삐진다
 function updateBossUI() {
+  const irr = 100 - boss.mood;
   const fill = $('#bossFill');
-  fill.style.width = boss.mood + '%';
-  fill.classList.toggle('low', boss.mood < 35);
-  $('#bossState').textContent = boss.sulky ? '삐짐' : boss.mood > 70 ? '좋음' : boss.mood > 35 ? '보통' : '언짢음';
+  fill.style.width = irr + '%';
+  fill.classList.toggle('low', irr > 65);
+  $('#bossState').textContent = boss.sulky ? '삐짐' : irr < 30 ? '평온' : irr < 65 ? '짜증' : '폭발 직전';
 }
 
 function startSulk() {
@@ -675,22 +701,25 @@ const WARN = [
 function startJinsang() {
   const lv = simT - (me.jinAt ?? -1e9) < ANGER_KEEP ? Math.min(3, (me.jinLv || 0) + 1) : 1;
   me.jinAt = simT;
+  stats.jin++;
   // 쫓겨나면 다음 진상은 다시 1단계부터
   me.jinLv = lv === 3 ? 0 : lv;
   me.path = [];
   if (me.state === 'walk') me.state = 'stand';
   me.do('tantrum');
   meSay(pick(JINSANG), 2.4, true);
-  send('jinsang', { lv });
+  // 경고 문구도 모두에게 같게 보이도록 고른 번호를 같이 보낸다
+  const wi = (Math.random() * 2) | 0;
+  send('jinsang', { lv, wi });
   if (lv === 3) {
     me.locked = true;
     me.lockedAt = simT;
   } else later(1.2, () => toast(lv === 1 ? '사장님이 눈치를 줘요 (화남 1/3)' : '사장님 표정이 굳었어요 (화남 2/3) 한 번 더 하면 쫓겨나요'));
-  jinsangEffects(me, lv);
+  jinsangEffects(me, lv, wi);
 }
 
 // 진상 부린 사람이 누구든 가게 쪽 반응은 같다
-function jinsangEffects(p, lv = 3) {
+function jinsangEffects(p, lv = 3, wi = 0) {
   sound.bang();
   // 가까운 손님들이 놀란다
   npcs
@@ -698,7 +727,7 @@ function jinsangEffects(p, lv = 3) {
     .slice(0, 4)
     .forEach((q, i) => later(0.7 + i * 0.3, () => say(q, pick(SHOCK), 1.8)));
   if (lv < 3) {
-    later(0.9, () => bossWarn(p, lv));
+    later(0.9, () => bossWarn(p, lv, wi));
     later(1.4, () => setBossMood(boss.mood - (lv === 1 ? 10 : 15)));
     return;
   }
@@ -714,19 +743,24 @@ function faceBossTo(p) {
 }
 
 // 1, 2단계. 바에서 그 손님 쪽을 보며 말한다. 바쁠 때는 말만
-function bossWarn(p, lv) {
+function bossWarn(p, lv, wi = 0) {
+  bossGrumble(p, WARN[lv - 1][wi % WARN[lv - 1].length], lv === 1 ? 'annoyed' : 'serious', lv === 2 ? 'warn' : null, lv === 2);
+}
+
+// 사장님이 바에서 그 손님 쪽을 보며 한마디. 바쁠 때는 말만
+function bossGrumble(p, line, face, act, big) {
   const b = bartender;
   // 경고하는 동안에는 평소 혼잣말을 하지 않는다
   b.timer = Math.max(b.timer, 6);
   // 그 손님 테이블 수다방에도 남긴다
   b.chatTable = p.seat ? p.seat.table : null;
-  b.faceMood = lv === 1 ? 'annoyed' : 'serious';
-  say(b, pick(WARN[lv - 1]), 2.6, lv === 2);
+  if (b.faceMood !== 'fury') b.faceMood = face;
+  say(b, line, 2.6, big);
   if (!bossBusy() && b.state === 'stand') {
     faceBossTo(p);
-    if (lv === 2) b.do('warn');
+    if (act) b.do(act);
   }
-  if (lv === 2) sound.humph();
+  if (big) sound.humph();
   later(3.2, restoreBossFace);
 }
 
@@ -843,9 +877,22 @@ function kickUpdate() {
     b.faceMood = 'fury';
     b.do('stop');
     say(b, '나가주세요!', 2.6, true);
-    later(1.5, () => kickOut(t));
     K.phase = 'stop';
-  } else if (K.phase === 'stop' && !b.action) {
+    K.retorted = false;
+    // 쫓겨나는 사람이 말대꾸한다. 내 쪽은 내가 고르고, 친구는 그 친구가 보낸 retort 를 기다린다
+    K.holdUntil = simT + 6;
+    if (t === me) later(1.4, startRetort);
+    else if (t.pendingRetort) {
+      const r = t.pendingRetort;
+      t.pendingRetort = null;
+      later(1.4, () => runRetort(t, r.i, r.j));
+    }
+  } else if (K.phase === 'stop' && !K.retorted && simT >= K.holdUntil) {
+    // 말대꾸 신호가 안 오면 그냥 내보낸다
+    K.retorted = true;
+    K.holdUntil = simT + 1;
+    kickOut(K.target, 0);
+  } else if (K.phase === 'stop' && K.retorted && !b.action && simT >= K.holdUntil) {
     walkBossHome(K);
   } else if (K.phase === 'back' && K.again && !kickGone(K)) {
     // 바로 돌아서서 다시 뛰어온다
@@ -864,29 +911,94 @@ function kickUpdate() {
   }
 }
 
-function kickOut(t) {
-  if (t === me) return kickOutMe();
-  if (!people.includes(t)) return;
-  // 다른 사람은 그 사람 화면에서도 똑같이 나가고, 위치는 접속 신호로 맞춰진다
-  t.action = null;
-  t.faceMood = 'sad';
-  t.walkTo(planPath(t.seat ? seatFront(t.seat) : t.pos, EXIT, W.obstacles));
-  t.kickedOut = true;
+// 쫓겨날 때 순순히 나가지 않고 말대꾸한다. [말대꾸, 사장님 대답]
+const RETORT = [
+  ['아 왜요! 돈 내고 마시는 건데!', '돈 안 받을 테니까 나가세요.'],
+  ['나 여기 단골인데?!', '오늘부로 아닙니다.'],
+  ['사장님 너무하시네 진짜!', '...하아. 문은 저쪽이에요.'],
+  ['한 잔만 더 마시고 갈게요~', '안 됩니다. 지금 당장이요.'],
+];
+// 문 밖에서 돌아보며 한마디. [외침, 사장님 대답]
+const EXIT_SHOUT = [
+  ['흥! 이 집 다신 안 와요!', '네~ 오지 마세요.'],
+  ['리뷰에 다 쓸 거예요!!', '...마음대로 하세요.'],
+  ['두고 봐요 진짜!', '하아...'],
+  ['내일 또 올 거예요~ 메롱!', '...소금 뿌려.'],
+];
+
+function startRetort() {
+  const i = (Math.random() * RETORT.length) | 0;
+  const j = (Math.random() * EXIT_SHOUT.length) | 0;
+  send('retort', { i, j });
+  runRetort(me, i, j);
 }
 
-function kickOutMe() {
-  me.action = null;
-  me.faceMood = 'sad';
-  meSay('...네.', 1.8);
-  me.walkTo(planPath(me.seat ? seatFront(me.seat) : me.pos, EXIT, W.obstacles));
-  me.kickedOut = true;
+function runRetort(t, i, j) {
+  if (!people.includes(t)) return;
+  const K = kick && kick.target === t ? kick : null;
+  if (K) {
+    K.retorted = true;
+    K.holdUntil = simT + 3.6;
+  }
+  const b = bartender;
+  t.targetYaw = Math.atan2(b.pos.x - t.pos.x, b.pos.z - t.pos.z);
+  t.faceMood = 'angry';
+  t.do('tantrum', 1.5);
+  say(t, RETORT[i][0], 2.4, true);
+  sound.bang();
+  // 말대꾸할수록 사장님 짜증이 오른다
+  later(0.6, () => setBossMood(boss.mood - 10));
+  later(1.5, () => {
+    b.faceMood = 'fury';
+    say(b, RETORT[i][1], 2.2, true);
+    if (b.state === 'stand') b.do('stop', 1.8);
+  });
+  later(3.0, () => kickOut(t, j));
+}
+
+function kickOut(t, j = 0) {
+  if (!people.includes(t)) return;
+  // 누가 쫓겨나든 모든 화면에서 똑같이 나간다. 친구 위치는 접속 신호로 다시 맞춰진다
+  t.action = null;
+  t.faceMood = 'pout';
+  t.exitShout = j;
+  t.walkTo(planPath(t.seat ? seatFront(t.seat) : t.pos, EXIT, W.obstacles));
+  t.kickedOut = true;
+  if (t === me) {
+    stats.kick++;
+    return;
+  }
   npcs
-    .filter((q) => q.pos.distanceTo(me.pos) < 5)
+    .filter((q) => q.pos.distanceTo(t.pos) < 5)
     .slice(0, 3)
-    .forEach((q, i) => later(1.0 + i * 0.4, () => {
-      say(q, pick(BYE), 1.8);
-      if (!q.action) q.do('laugh');
-    }));
+    .forEach((q, k) =>
+      later(1.0 + k * 0.4, () => {
+        say(q, pick(BYE), 1.8);
+        if (!q.action) q.do('laugh');
+      })
+    );
+}
+
+// 문 밖에 도착하면 가게를 돌아보며 한마디 던지고, 사장님이 받아친다
+function exitShout(t) {
+  const [line, reply] = EXIT_SHOUT[t.exitShout || 0];
+  t.kickedOut = false;
+  t.targetYaw = Math.PI;
+  t.faceMood = 'angry';
+  t.do('humph');
+  say(t, line, 2.4, true);
+  later(0.5, () => setBossMood(boss.mood - 5));
+  later(1.4, () => say(bartender, reply, 2));
+  later(2.6, () => {
+    if (!t.kickedOut) t.faceMood = null;
+  });
+  // 방장이 내보낸 사람은 문 밖에서 사라진다
+  if (t.banned)
+    later(3, () => {
+      if (t === me) return showBanned();
+      bannedIds.add(t.netId);
+      removePeer(t.netId);
+    });
 }
 
 // 의자에서 일어난 자리. walkTo 가 일으켜 세우기 전에 길을 계산하려고 쓴다
@@ -898,18 +1010,137 @@ function meUpdate() {
   // 안전장치. 진상 뒤에 사장님 일이 하나도 없으면 다시 부른다
   if (me.locked && !me.kickedOut && !kickPendingFor(me) && simT - (me.lockedAt || 0) > 3) requestKick(me);
   if (me.kickedOut && me.state === 'stand') {
-    me.kickedOut = false;
     me.locked = false;
-    me.faceMood = null;
-    me.targetYaw = Math.PI;
-    toast('쫓겨났어요... 빈 의자를 누르면 다시 들어갈 수 있어요');
+    exitShout(me);
+    later(1.5, () => toast('쫓겨났어요... 빈 의자를 누르면 다시 들어갈 수 있어요'));
   }
-  // 다른 사람이 쫓겨나 밖에 도착하면 표정을 되돌린다
+  // 다른 사람이 쫓겨나 밖에 도착해도 똑같이 한마디 한다
   for (const r of peers.values()) {
-    if (r.p.kickedOut && r.p.state === 'stand') {
-      r.p.kickedOut = false;
-      r.p.faceMood = null;
+    if (r.p.kickedOut && r.p.state === 'stand') exitShout(r.p);
+  }
+}
+
+// 화장실. 소변, 대변, 토하기. 칸에 들어가 볼일을 보고 나오면 사장님 짜증이 오른다
+// 같이 놀 때는 시작만 wc 로 알리고, 나머지 장면은 모든 화면에서 똑같이 흘러간다
+const WC = {
+  pee: { name: '소변', dur: 4 },
+  poop: { name: '대변', dur: 7 },
+  vomit: { name: '토하기', dur: 4.6 },
+};
+const SMELL = ['윽 무슨 냄새야', '아 누구야...', '코 막혀...', '환기 좀 해요!'];
+
+function runToilet(p, kind) {
+  if (p.isMe) {
+    me.wcSeat = me.seat;
+    stats.wc++;
+    // 화장실로 가면 속 안 좋은 건 넘어간다
+    endNausea();
+  }
+  p.wc = { kind, phase: 'go' };
+  p.walkTo(planPath(p.seat ? seatFront(p.seat) : p.pos, W.wc.front, W.obstacles));
+}
+
+function wcUpdate() {
+  const c = W.wc;
+  for (const p of people) {
+    const w = p.wc;
+    if (!w) continue;
+    if (w.phase === 'go' && p.state === 'stand') {
+      // 누가 안에 있으면 앞에서 기다린다
+      if (c.user && c.user !== p) continue;
+      c.user = p;
+      c.setBusy(true);
+      c.openTarget = 1;
+      p.noClip = true;
+      p.targetYaw = -Math.PI / 2;
+      w.phase = 'opening';
+      w.until = simT + 0.35;
+    } else if (w.phase === 'opening' && simT >= w.until) {
+      p.walkTo([{ ...c.inside }]);
+      w.phase = 'enter';
+    } else if (w.phase === 'enter' && p.state === 'stand') {
+      c.openTarget = 0;
+      p.root.visible = false;
+      w.phase = 'inside';
+      w.until = simT + WC[w.kind].dur;
+      insideScene(p, w.kind);
+    } else if (w.phase === 'inside' && simT >= w.until) {
+      sound.flush();
+      c.openTarget = 1;
+      p.root.visible = true;
+      w.phase = 'leaving';
+      w.until = simT + 0.5;
+    } else if (w.phase === 'leaving' && simT >= w.until) {
+      p.walkTo([{ ...c.front }]);
+      w.phase = 'exit';
+    } else if (w.phase === 'exit' && p.state === 'stand') {
+      c.openTarget = 0;
+      c.user = null;
+      c.setBusy(false);
+      p.noClip = false;
+      p.wc = null;
+      afterToilet(p, w.kind);
     }
+  }
+}
+
+function insideScene(p, kind) {
+  const c = W.wc;
+  const nearNpcs = () => npcs.filter((q) => q.pos.distanceTo(new THREE.Vector3(c.front.x, 0, c.front.z)) < 7).slice(0, 3);
+  if (kind === 'pee') {
+    say(p, '쉬이이~', 2.6);
+    sound.pee(3.2);
+  } else if (kind === 'poop') {
+    say(p, '끄으응...', 1.8);
+    sound.strain();
+    c.rattle = 1.2;
+    later(1.9, () => {
+      say(p, '뿌지직!!', 1.8, true);
+      sound.plop();
+      c.rattle = 0.6;
+      W.stink(c.top, 14);
+    });
+    later(3.4, () => nearNpcs().forEach((q, i) => later(i * 0.4, () => say(q, pick(SMELL), 1.8))));
+    later(4.2, () => say(server, '어머~ 이게 무슨 냄새야~', 2));
+    later(5.2, () => say(p, '휴우~ 살 것 같다', 2));
+  } else if (kind === 'vomit') {
+    say(p, '우웨에엑!!', 1.8, true);
+    sound.gag();
+    c.rattle = 0.8;
+    later(1.7, () => {
+      say(p, '우웩...', 1.4);
+      sound.gag();
+      c.rattle = 0.6;
+    });
+    later(3.2, () => say(p, '...이제 좀 낫다', 1.8));
+  }
+}
+
+function afterToilet(p, kind) {
+  if (kind === 'pee') {
+    setBossMood(boss.mood - 12);
+    bossGrumble(p, '손님... 조준 좀 하세요. 하아.', 'annoyed');
+    later(1.6, () => say(server, '어머~ 바닥이 흥건하네~ 호호', 2));
+  } else if (kind === 'poop') {
+    setBossMood(boss.mood - 20);
+    bossGrumble(p, '누가 화장실 막았어요?! 하...', 'serious', 'warn', true);
+  } else if (kind === 'vomit') {
+    // 토하고 나면 술이 좀 깬다
+    p.drinks = Math.max(0, p.drinks - 4);
+    if (p.isMe) updateMeter();
+    setBossMood(boss.mood - 25);
+    bossGrumble(p, '아 진짜!! 화장실에 토하면 어떡해요!', 'serious', 'warn', true);
+    later(1.6, () => say(server, '어머머~ 이거 풍순이가 치워야 돼? 흥', 2));
+  }
+  if (p.isMe) {
+    // 앉았던 자리가 비어 있으면 돌아간다
+    const s = me.wcSeat;
+    me.wcSeat = null;
+    if (s && !s.occupant) later(0.8, () => !me.wc && !me.locked && me.state === 'stand' && goTo({ x: s.x, z: s.z }, s));
+  } else if (p.pendingGo) {
+    const d = p.pendingGo;
+    p.pendingGo = null;
+    walkPeer(p, { x: d.x, z: d.z }, seatFromKey(d.s));
   }
 }
 
@@ -929,6 +1160,10 @@ setInterval(() => {
 // 버튼
 // 쫓겨나는 동안에는 아무것도 못 한다
 function blocked() {
+  if (me.wc) {
+    toast('화장실에 있어요...');
+    return true;
+  }
   if (me.locked) {
     toast(me.kickedOut ? '쫓겨나는 중이에요...' : '사장님이 오고 있어요...');
     return true;
@@ -959,9 +1194,9 @@ $('#bCheers').onclick = () => {
 };
 $('#bShot').onclick = () => {
   if (blocked() || me.action) return;
-  if (me.drinks >= 8) {
+  if (me.drinks >= MAX_DRINKS) {
     meSay('오늘은 물만 마실래...', 2);
-    toast('취기가 가득 찼어요. 잠깐 쉬면 줄어들어요');
+    toast('더는 못 마셔요. 잠깐 쉬면 줄어들어요');
     return;
   }
   me.do('oneshot');
@@ -994,7 +1229,10 @@ function sendChat(e) {
   const text = chatInput.value.trim().slice(0, 40);
   chatInput.value = '';
   if (!text) return;
+  // 업다운 내 차례에는 수다방에 쓴 숫자를 답으로 받는다
+  if (myTurn && myTurn.kind === 'updown' && /^\d{1,2}$/.test(text)) return submitTurn(text);
   if (blocked()) return;
+  stats.chat++;
   me.do('talk');
   send('act', { a: 'talk' });
   meSay(text, 3);
@@ -1028,6 +1266,7 @@ menuBox.querySelectorAll('[data-kind]').forEach((b) => {
       return;
     }
     toast(`${b.dataset.name} 주문했어요`);
+    stats.order++;
     send('order', { tid: me.seat.table.id, kind: b.dataset.kind });
     acceptOrder(me.seat.table, b.dataset.kind);
   };
@@ -1036,6 +1275,7 @@ menuBox.querySelectorAll('[data-kind]').forEach((b) => {
 // 주문 받기. 내 주문이든 친구 주문이든 똑같이 서빙하고 환호한다
 function acceptOrder(T, kind) {
   server.jobs.push({ table: T, kind });
+  T.bill.items[kind] = (T.bill.items[kind] || 0) + 1;
   sound.bell();
   if (!bossBusy()) {
     say(bartender, '네~ 주문 받았습니다!', 2);
@@ -1050,6 +1290,32 @@ soundBtn.onclick = () => {
   sound.setOn(!sound.on);
   soundBtn.classList.toggle('off', !sound.on);
 };
+const wcBox = $('#wcMenu');
+$('#bWc').onclick = () => {
+  if (blocked()) return;
+  if (nausea) return goToilet('vomit');
+  wcBox.classList.add('show');
+};
+$('#wcClose').onclick = () => wcBox.classList.remove('show');
+wcBox.querySelectorAll('[data-wc]').forEach((b) => {
+  b.onclick = () => {
+    wcBox.classList.remove('show');
+    if (blocked()) return;
+    goToilet(b.dataset.wc);
+  };
+});
+
+function goToilet(kind) {
+  const u = W.wc.user;
+  if (u && u !== me) {
+    sound.knock();
+    toast(`${u.remote ? u.name + '님이 ' : '누가 '}화장실 쓰는 중이에요`);
+    return;
+  }
+  send('wc', { k: kind });
+  runToilet(me, kind);
+}
+
 $('#bJinsang').onclick = () => {
   if (blocked() || me.action) return;
   startJinsang();
@@ -1071,7 +1337,14 @@ $('#enter').onclick = () => {
     try {
       localStorage.setItem('pungsok-name', name);
     } catch (e) {}
+    const pw = $('#pwInput').value.trim();
+    roomPwHash = pw ? hashText(pw) : '';
+    myPw = pw;
     startNet();
+    // 한참 아무도 없으면 방 코드나 비밀번호를 확인하라고 알려 준다
+    setTimeout(() => {
+      if (!peers.size) logSystem('아직 아무도 없어요. 친구가 안 보이면 방 코드와 비밀번호가 같은지 확인해 주세요');
+    }, 15000);
   }
   sound.start();
   $('#intro').classList.add('hide');
@@ -1197,7 +1470,11 @@ const peers = new Map();
 // 무료 요금제의 초당 메시지 한도를 아끼려고 접속 신호는 2초마다 보낸다
 const HEARTBEAT_MS = 2000;
 const PEER_TIMEOUT = 9000;
-const ROOM = MULTI ? roomFromHash() : '';
+const ROOM_HASH = MULTI ? roomFromHash() : { code: '', pw: '' };
+const ROOM = ROOM_HASH.code;
+// 비밀번호가 있으면 채널 이름에 비밀번호 해시를 붙인다. 비밀번호가 다르면 아예 다른 방이 된다
+let roomPwHash = '';
+const channelName = () => ROOM + (roomPwHash ? '-' + roomPwHash : '');
 
 function send(t, d) {
   if (net) net.send({ t, f: MY_ID, d });
@@ -1218,14 +1495,26 @@ function seatFromKey(k) {
   return (W.tables[t] && W.tables[t].seats[i]) || null;
 }
 
-// 방 코드는 주소 # 뒤에 둔다. 없으면 새로 만든다
+// 방 코드는 주소 # 뒤에 둔다. 비밀번호를 같이 넣은 초대 링크는 #방코드~비밀번호. 없으면 새로 만든다
 function roomFromHash() {
-  let c = location.hash.slice(1).toLowerCase();
+  const raw = location.hash.slice(1);
+  const cut = raw.indexOf('~');
+  let c = (cut < 0 ? raw : raw.slice(0, cut)).toLowerCase();
+  let pw = '';
+  try {
+    pw = cut < 0 ? '' : decodeURIComponent(raw.slice(cut + 1));
+  } catch (e) {}
   if (!/^[a-z0-9-]{3,24}$/.test(c)) {
     c = Math.random().toString(36).slice(2, 8);
     history.replaceState(null, '', location.pathname + location.search + '#' + c);
   }
-  return c;
+  return { code: c, pw };
+}
+
+function hashText(t) {
+  let h = 2166136261;
+  for (const ch of 'pungsok:' + t) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return h.toString(36);
 }
 
 // 방장. 가장 먼저 들어온 사람(같으면 아이디 순)
@@ -1237,8 +1526,16 @@ function isHost() {
   return true;
 }
 
+function hostId() {
+  let best = { id: MY_ID, j: joinedAt };
+  for (const r of peers.values()) if (r.joinedAt < best.j || (r.joinedAt === best.j && r.id < best.id)) best = { id: r.id, j: r.joinedAt };
+  return best.id;
+}
+
 function updateCount() {
-  $('#count').textContent = `손님 ${(MULTI ? peers.size : npcs.length) + 1}명`;
+  let t = `손님 ${(MULTI ? peers.size : npcs.length) + 1}명`;
+  if (MULTI && peers.size) t += isHost() ? ' · 내가 방장' : ` · 방장 ${peers.get(hostId()) ? peers.get(hostId()).p.name : ''}`;
+  $('#count').textContent = t;
 }
 
 function logSystem(text) {
@@ -1247,9 +1544,22 @@ function logSystem(text) {
 
 function startNet() {
   joinedAt = Date.now();
-  net = createNet({ url: NET_URL, key: NET_KEY, room: ROOM, local: LOCAL_NET, onMessage: onNet, onStatus: onNetStatus });
+  connectNet();
   setInterval(heartbeat, HEARTBEAT_MS);
   window.addEventListener('pagehide', () => send('bye'));
+}
+
+function connectNet() {
+  net = createNet({ url: NET_URL, key: NET_KEY, room: channelName(), local: LOCAL_NET, onMessage: onNet, onStatus: onNetStatus });
+}
+
+// 방 비밀번호가 바뀌면 모두 새 채널로 옮긴다
+function switchChannel(h) {
+  if (h === roomPwHash) return;
+  if (net) net.close();
+  roomPwHash = h;
+  connectNet();
+  heartbeat();
 }
 
 function onNetStatus(st) {
@@ -1264,7 +1574,7 @@ function onNetStatus(st) {
 }
 
 function heartbeat() {
-  send('hi', { n: myName, j: joinedAt, x: +me.pos.x.toFixed(2), z: +me.pos.z.toFixed(2), s: seatKey(me.seat), dr: me.drinks });
+  send('hi', { n: myName, j: joinedAt, x: +me.pos.x.toFixed(2), z: +me.pos.z.toFixed(2), s: seatKey(me.seat), dr: me.drinks, lk: encodeLook(myLookIdx), st: packStats(stats) });
   // 방장은 6초마다 사장님 기분을 맞춰 준다
   if (++hbCount % 3 === 0 && isHost()) send('boss', { m: Math.round(boss.mood), s: boss.sulky });
 }
@@ -1272,7 +1582,10 @@ function heartbeat() {
 function ensurePeer(id, d) {
   let r = peers.get(id);
   if (!r) {
-    const p = addPerson({ ...lookFor(id), name: (d.n || '손님').slice(0, 8) });
+    const lk = decodeLook(d.lk) ? d.lk : encodeLook(defaultLookIdx(id));
+    const p = addPerson({ ...lookFromIdx(decodeLook(lk)), name: (d.n || '손님').slice(0, 8) });
+    p.lk = lk;
+    p.stats = unpackStats(d.st);
     p.remote = true;
     p.netId = id;
     p.onOneshot = onOneshot;
@@ -1327,7 +1640,12 @@ function walkPeer(p, target, seat) {
 function applyHi(r, d) {
   const p = r.p;
   if (typeof d.dr === 'number') p.drinks = d.dr;
-  if (p.state === 'hop' || p.kickedOut) return;
+  if (d.st) p.stats = unpackStats(d.st);
+  if (d.lk && d.lk !== p.lk && decodeLook(d.lk)) {
+    p.lk = d.lk;
+    p.setLook(lookFromIdx(decodeLook(d.lk)));
+  }
+  if (p.state === 'hop' || p.kickedOut || p.wc) return;
   const seat = seatFromKey(d.s);
   if (seat) {
     if (p.seat === seat) return;
@@ -1369,7 +1687,7 @@ function remoteAct(p, a) {
 }
 
 function sendSnapshot(to) {
-  send('snap', { to, dishes: W.tables.map((T) => T.dishes.map((x) => x.kind)), m: Math.round(boss.mood), s: boss.sulky });
+  send('snap', { to, dishes: W.tables.map((T) => T.dishes.map((x) => x.kind)), bills: W.tables.map((T) => T.bill), m: Math.round(boss.mood), s: boss.sulky });
 }
 
 function syncBoss(m, s) {
@@ -1389,7 +1707,20 @@ function onNet(m) {
   if (!m || m.f === MY_ID) return;
   const d = m.d || {};
   if (m.t === 'bye') return removePeer(m.f);
+  if (bannedIds.has(m.f)) return;
   if (m.t === 'hi') return applyHi(ensurePeer(m.f, d), d);
+  // 방장만 할 수 있는 것
+  if (m.t === 'pw' || m.t === 'ban' || m.t === 'bossReset') {
+    if (m.f !== hostId()) return;
+    if (m.t === 'pw') {
+      toast('방장이 방 비밀번호를 바꿨어요');
+      return switchChannel(String(d.h || ''));
+    }
+    if (m.t === 'ban') return applyBan(d.id);
+    return bossResetNow();
+  }
+  if (m.t === 'game') return applyGame(d);
+  if (m.t === 'gameIn') return games.input(m.f, d.gid, d.v);
   // 직원 신호와 늦게 온 사람용 상태는 보낸 사람을 몰라도 받는다
   if (m.t === 'snap') {
     if (d.to !== MY_ID || snapDone) return;
@@ -1397,6 +1728,10 @@ function onNet(m) {
     (d.dishes || []).forEach((kinds, ti) => {
       const T = W.tables[ti];
       if (T && !T.dishes.length) kinds.forEach((k) => placeDish(W, scene, T, k));
+    });
+    (d.bills || []).forEach((b, ti) => {
+      const T = W.tables[ti];
+      if (T && b && typeof b.shots === 'number') T.bill = { items: { ...b.items }, shots: b.shots };
     });
     return syncBoss(d.m, d.s);
   }
@@ -1407,27 +1742,44 @@ function onNet(m) {
   if (m.t === 'boss') return !isHost() && syncBoss(d.m, d.s);
   if (m.t === 'poke') return pokeBoss(true);
   if (m.t === 'order') return W.tables[d.tid] && acceptOrder(W.tables[d.tid], d.kind);
+  if (m.t === 'pay') return W.tables[d.tid] && peers.get(m.f) && applyPay(peers.get(m.f).p, W.tables[d.tid], d.mode, d.total | 0);
   // 나머지는 그 사람 캐릭터가 하는 일
   const r = peers.get(m.f);
   if (!r) return;
   const p = r.p;
   if (m.t === 'go') {
-    if (!p.kickedOut) walkPeer(p, { x: d.x, z: d.z }, seatFromKey(d.s));
+    // 화장실에서 나오는 중이면 다 나온 뒤에 간다
+    if (p.wc) p.pendingGo = d;
+    else if (!p.kickedOut) walkPeer(p, { x: d.x, z: d.z }, seatFromKey(d.s));
+  } else if (m.t === 'look') {
+    if (decodeLook(d.lk) && d.lk !== p.lk) {
+      p.lk = d.lk;
+      p.setLook(lookFromIdx(decodeLook(d.lk)));
+    }
+  } else if (m.t === 'puke') {
+    if (!p.kickedOut && !p.wc) runPuke(p);
+  } else if (m.t === 'wc') {
+    if (WC[d.k] && !p.wc && !p.kickedOut) runToilet(p, d.k);
   } else if (m.t === 'say') say(p, String(d.t).slice(0, 40), 3, !!d.b);
   else if (m.t === 'act') remoteAct(p, d.a);
-  else if (m.t === 'jinsang') {
+  else if (m.t === 'retort') {
+    const i = Math.min(RETORT.length - 1, Math.max(0, d.i | 0));
+    const j = Math.min(EXIT_SHOUT.length - 1, Math.max(0, d.j | 0));
+    if (kick && kick.target === p && kick.phase === 'stop' && !kick.retorted) runRetort(p, i, j);
+    else p.pendingRetort = { i, j };
+  } else if (m.t === 'jinsang') {
     p.path = [];
     if (p.state === 'walk') p.state = 'stand';
     p.do('tantrum');
-    jinsangEffects(p, Math.min(3, Math.max(1, d.lv | 0 || 3)));
+    jinsangEffects(p, Math.min(3, Math.max(1, d.lv | 0 || 3)), d.wi | 0);
   }
 }
 
 // 입장 화면. 같이 놀 때는 이름과 방 코드, 초대 링크 복사를 보여 준다
 if (MULTI) {
   $('#multiBox').hidden = false;
-  $('#bInvite').hidden = false;
   $('#roomCode').textContent = ROOM;
+  $('#pwInput').value = ROOM_HASH.pw;
   try {
     $('#nameInput').value = localStorage.getItem('pungsok-name') || '';
   } catch (e) {}
@@ -1435,24 +1787,596 @@ if (MULTI) {
   // 방 코드가 바뀌면 그 방으로 다시 들어간다
   window.addEventListener('hashchange', () => location.reload());
 }
+// 초대 링크. 비밀번호를 아는 사람(방에 비밀번호를 넣고 들어온 사람, 바꾼 방장)은 비밀번호까지 넣어 준다
+let myPw = '';
+function inviteLink() {
+  const base = location.origin + location.pathname + location.search;
+  const pw = myPw || $('#pwInput').value.trim();
+  return base + '#' + ROOM + (pw && (!roomPwHash || hashText(pw) === roomPwHash) ? '~' + encodeURIComponent(pw) : '');
+}
 async function copyInvite() {
+  const link = inviteLink();
   try {
-    await navigator.clipboard.writeText(location.href);
+    await navigator.clipboard.writeText(link);
     toast('초대 링크를 복사했어요. 친구에게 보내 주세요');
   } catch (e) {
-    toast('주소창의 링크를 복사해서 친구에게 보내 주세요');
+    showInfo('초대 링크', link);
   }
 }
 $('#copyLink').onclick = copyInvite;
-$('#bInvite').onclick = copyInvite;
 
-// 사장님 기분은 조금씩 회복된다. 삐졌을 때는 더 천천히
+// ---------- 속 안 좋음과 바닥에 토하기 ----------
+// 8잔을 넘기면 속이 뒤집힌다. 12초 안에 화장실에 가지 않으면 바닥에 토하고, 사장님이 폭발해서 내보낸다
+const NAUSEA_AT = 8;
+const MAX_DRINKS = 10;
+const NAUSEA_SEC = 12;
+let nausea = null;
+
+function startNausea() {
+  nausea = { until: simT + NAUSEA_SEC };
+  meSay('윽... 속이 안 좋아...', 2);
+  $('#nausea').hidden = false;
+  toast('속이 안 좋아요! 화장실 버튼을 눌러 빨리 가세요');
+}
+
+function endNausea() {
+  nausea = null;
+  $('#nausea').hidden = true;
+}
+
+function nauseaUpdate() {
+  if (!nausea) return;
+  const left = Math.max(0, nausea.until - simT);
+  $('#nauseaSec').textContent = Math.ceil(left);
+  if (left > 0) return;
+  endNausea();
+  if (me.wc || me.locked) return;
+  send('puke', {});
+  runPuke(me);
+}
+
+// 바닥 토사물. 한동안 남아 있다가 풍순이가 치운다
+const pukeTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 9; i++) {
+    g.fillStyle = `rgba(${170 + Math.random() * 40},${170 + Math.random() * 30},${60 + Math.random() * 30},0.9)`;
+    g.beginPath();
+    g.ellipse(64 + rnd(-28, 28), 64 + rnd(-22, 22), rnd(14, 30), rnd(10, 22), Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+
+function addPuddle(p) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: pukeTex, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(p.pos.x + Math.sin(p.yaw) * 0.45, 0.012, p.pos.z + Math.cos(p.yaw) * 0.45);
+  scene.add(m);
+  W.stink(new THREE.Vector3(m.position.x, 0.3, m.position.z), 10);
+  later(30, () => say(server, '어머머~ 이거 풍순이가 치우는 거예요? 흥!', 2));
+  later(32, () => {
+    scene.remove(m);
+    m.geometry.dispose();
+    m.material.dispose();
+  });
+}
+
+function runPuke(p) {
+  if (p.seat) p.standUp();
+  p.path = [];
+  p.state = 'stand';
+  p.onPuke = (q) => {
+    addPuddle(q);
+    sound.gag();
+    later(0.8, () => sound.gag());
+  };
+  p.do('puke');
+  say(p, '우웨에에엑!!', 2.2, true);
+  p.drinks = 3;
+  if (p.isMe) {
+    stats.puke++;
+    me.locked = true;
+    me.lockedAt = simT;
+    updateMeter();
+  }
+  npcs
+    .filter((q) => q.pos.distanceTo(p.pos) < 5)
+    .slice(0, 4)
+    .forEach((q, i) => later(0.6 + i * 0.35, () => say(q, pick(['으악!!', '아 진짜 더러워!', '헐 토했어...', '윽 냄새...']), 1.8)));
+  later(1.0, () => say(bartender, '...저기요?!', 1.2));
+  later(1.6, () => bossRage(p));
+  later(2.2, () => say(server, '꺄악~ 내 구두!!', 1.8));
+  later(2.4, () => setBossMood(boss.mood - 35));
+  later(3.0, () => requestKick(p));
+}
+
+// ---------- 계산 ----------
+function billLines(T) {
+  const rows = [];
+  for (const m of MENU) {
+    const q = T.bill.items[m.kind] || 0;
+    if (q) rows.push({ name: m.name, qty: q, price: q * PRICE[m.kind] });
+  }
+  const bottles = Math.ceil(T.bill.shots / SOJU_SHOTS);
+  if (bottles) rows.push({ name: `소주 (${T.bill.shots}잔)`, qty: bottles, price: bottles * SOJU_PRICE, unit: '병' });
+  return { rows, total: rows.reduce((a, r) => a + r.price, 0) };
+}
+
+const won = (n) => n.toLocaleString('ko-KR') + '원';
+
+function openBill() {
+  if (needSeat()) return;
+  const T = me.seat.table;
+  const { rows, total } = billLines(T);
+  const n = seated(T).length;
+  const list = $('#billRows');
+  list.replaceChildren(
+    ...rows.map((r) => {
+      const li = document.createElement('div');
+      li.className = 'billRow';
+      li.innerHTML = '<span></span><span></span>';
+      li.children[0].textContent = `${r.name} × ${r.qty}${r.unit || ''}`;
+      li.children[1].textContent = won(r.price);
+      return li;
+    })
+  );
+  if (!rows.length) list.textContent = '아직 계산할 게 없어요';
+  $('#billTotal').textContent = won(total);
+  $('#billEach').textContent = `${n}명이면 1인 ${won(Math.ceil(total / n / 100) * 100)}`;
+  $('#billDutch').disabled = $('#billFlex').disabled = !total;
+  $('#billTitle').textContent = `${T.id + 1}번 테이블 계산서`;
+  $('#bill').classList.add('show');
+}
+
+function payBill(mode) {
+  $('#bill').classList.remove('show');
+  if (!me.seat || me.locked) return;
+  const T = me.seat.table;
+  const { total } = billLines(T);
+  if (!total) return;
+  send('pay', { tid: T.id, mode, total });
+  applyPay(me, T, mode, total);
+}
+
+function applyPay(p, T, mode, total) {
+  T.bill = { items: {}, shots: 0 };
+  const mates = seated(T).filter((q) => q !== p && autoOk(q));
+  if (mode === 'flex') {
+    if (p.isMe) stats.flex += total;
+    if (!p.action) p.do('cheers');
+    say(p, `오늘은 내가 쏜다!! (${won(total)})`, 2.6, true);
+    sound.clink(4);
+    W.sparkle(new THREE.Vector3(T.x, TABLE_H + 0.8, T.z));
+    W.confetti(new THREE.Vector3(T.x, TABLE_H + 1.4, T.z));
+    mates.forEach((q, i) =>
+      later(0.6 + i * 0.3, () => {
+        if (!q.action) q.do('wave');
+        say(q, pick([`와아~ ${p.isMe ? '최고' : p.name + ' 최고'}!`, '잘 먹었습니다~!', '사랑해요~']), 1.8);
+      })
+    );
+    later(1.2, () => {
+      say(bartender, '감사합니다~!! 또 오세요~', 2.2);
+      if (!bossBusy() && bartender.state === 'stand') bartender.do('wave');
+      setBossMood(boss.mood + 25);
+    });
+    later(2.0, () => {
+      say(server, '어머~ 멋있다~ 풍순이도 한 잔 사 줘요~', 2);
+      hearts(server);
+    });
+  } else {
+    say(p, `1/N 해요~ (1인 ${won(Math.ceil(total / Math.max(1, seated(T).length) / 100) * 100)})`, 2.4);
+    mates.forEach((q, i) => later(0.6 + i * 0.3, () => say(q, pick(['오케이~', '계좌 보내~', '콜!']), 1.6)));
+    later(1.2, () => {
+      say(bartender, '감사합니다~', 2);
+      setBossMood(boss.mood + 8);
+    });
+  }
+}
+
+// ---------- 술게임 ----------
+const npcId = (p) => 'n' + npcs.indexOf(p);
+function idOf(p) {
+  if (p === me) return MY_ID;
+  if (p.remote) return p.netId;
+  return npcId(p);
+}
+function personById(id) {
+  if (id === MY_ID) return me;
+  if (id === 'mc') return server;
+  if (/^n\d+$/.test(id)) return npcs[+id.slice(1)] || null;
+  const r = peers.get(id);
+  return r ? r.p : null;
+}
+function nameOf(id) {
+  if (id === MY_ID) return MULTI ? myName : '나';
+  const p = personById(id);
+  return p ? p.name || '손님' : '손님';
+}
+
+const games = createGames({
+  now: () => simT,
+  emit: (ev) => {
+    send('game', ev);
+    applyGame(ev);
+  },
+  name: nameOf,
+  isNpc: (id) => /^n\d+$/.test(id),
+  skill: (id) => {
+    const p = personById(id);
+    return THREE.MathUtils.clamp(0.93 - (p ? p.drinks : 0) * 0.05, 0.55, 0.95);
+  },
+  rnd,
+});
+
+// 테이블마다 지금 하는 게임
+const tableGames = new Map();
+let myTurn = null;
+const roulRing = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.42, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd29a).multiplyScalar(2.2), transparent: true, depthWrite: false }));
+roulRing.rotation.x = -Math.PI / 2;
+roulRing.visible = false;
+scene.add(roulRing);
+
+function startGame(kind) {
+  $('#gameSheet').classList.remove('show');
+  if (needSeat() || blocked()) return;
+  const T = me.seat.table;
+  if (tableGames.has(T.id)) return toast('이 테이블은 벌써 게임 중이에요');
+  const players = seated(T).map(idOf);
+  if (players.length < 2) return toast('같은 테이블에 2명 이상 있어야 해요');
+  meSay(`${GAMES[kind].name} 하자!`, 2);
+  games.start(kind, T.id, players, MY_ID);
+}
+
+function applyGame(ev) {
+  if (!ev || !ev.gid) return;
+  if (ev.e === 'start') {
+    tableGames.set(ev.tid, { gid: ev.gid, players: ev.players, last: simT, kind: ev.kind });
+    if (ev.players.includes(MY_ID)) toast(`${GAMES[ev.kind].name} 시작!`);
+    return;
+  }
+  const entry = [...tableGames.entries()].find(([, v]) => v.gid === ev.gid);
+  if (!entry) return;
+  const [tid, game] = entry;
+  game.last = simT;
+  if (ev.e === 'say') {
+    const p = ev.who === 'mc' ? server : personById(ev.who);
+    if (!p) return;
+    if (ev.who === 'mc') server.chatTable = W.tables[tid];
+    say(p, ev.text, 2, !!ev.big);
+    if (ev.act && !p.action) p.do(ev.act);
+    if (ev.act === 'clap') sound.pop();
+  } else if (ev.e === 'turn') {
+    if (ev.pid === MY_ID) showTurn(ev);
+    else hideTurn();
+  } else if (ev.e === 'roul') {
+    spinRoulette(ev.order, ev.loser, ev.dur);
+  } else if (ev.e === 'lose') {
+    hideTurn();
+    const p = personById(ev.pid);
+    if (!p) return;
+    if (p === me) stats.lost++;
+    later(0.8, () => {
+      // 모든 화면이 lose 를 받아 각자 마시게 하므로 따로 알리지 않는다
+      p.do('oneshot');
+      later(0.55, () => sound.gulp());
+    });
+    game.players
+      .map(personById)
+      .filter((q) => q && q !== p && autoOk(q))
+      .forEach((q, i) => later(0.3 + i * 0.25, () => say(q, pick(['마셔라~ 마셔라~', 'ㅋㅋㅋㅋ 원샷!', '쭉쭉~']), 1.6)));
+    sound.clink(2);
+  } else if (ev.e === 'end') {
+    tableGames.delete(tid);
+    if (!roam && !server.job) server.chatTable = null;
+    hideTurn();
+    roulRing.visible = false;
+  }
+}
+
+// 진행하던 사람이 나가서 소식이 끊긴 게임은 정리한다
+function gameWatchdog() {
+  for (const [tid, g] of tableGames) {
+    if (simT - g.last > 25) {
+      tableGames.delete(tid);
+      hideTurn();
+    }
+  }
+}
+
+function spinRoulette(order, loser, dur) {
+  const ps = order.map(personById).filter(Boolean);
+  if (!ps.length) return;
+  roulRing.visible = true;
+  const end = ps.indexOf(personById(loser));
+  const steps = ps.length * 3 + Math.max(0, end);
+  let k = 0;
+  const hop = () => {
+    const p = ps[k % ps.length];
+    roulRing.position.set(p.pos.x, 0.03, p.pos.z);
+    sound.pop();
+    if (k++ < steps) later((dur / steps) * (0.4 + (k / steps) * 1.2), hop);
+    else later(2.5, () => (roulRing.visible = false));
+  };
+  hop();
+}
+
+// 내 차례 패널
+function showTurn(ev) {
+  myTurn = ev;
+  const box = $('#turn');
+  $('#turnTitle').textContent = ev.kind === 'updown' ? `내 차례! ${ev.lo}~${ev.hi} 중에 하나` : `내 차례! ${ev.n}`;
+  $('#turnUpdown').hidden = ev.kind !== 'updown';
+  $('#turn369').hidden = ev.kind !== 'g369';
+  $('#turnNum').textContent = String(ev.n);
+  $('#turnInput').value = '';
+  box.hidden = false;
+  const bar = $('#turnBar');
+  bar.style.transition = 'none';
+  bar.style.width = '100%';
+  requestAnimationFrame(() => {
+    bar.style.transition = `width ${ev.dur}s linear`;
+    bar.style.width = '0%';
+  });
+  if (ev.kind === 'updown') setTimeout(() => $('#turnInput').focus(), 50);
+}
+function hideTurn() {
+  myTurn = null;
+  $('#turn').hidden = true;
+}
+function submitTurn(v) {
+  if (!myTurn) return;
+  const ev = myTurn;
+  hideTurn();
+  if (games.gid === ev.gid) games.input(MY_ID, ev.gid, v);
+  else send('gameIn', { gid: ev.gid, v });
+}
+$('#turnForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  submitTurn($('#turnInput').value.trim());
+});
+$('#turnSay').onclick = () => submitTurn('num');
+$('#turnClap').onclick = () => submitTurn('clap');
+
+$('#bGame').onclick = () => {
+  if (blocked() || needSeat()) return;
+  $('#gameSheet').classList.add('show');
+};
+$('#gameClose').onclick = () => $('#gameSheet').classList.remove('show');
+document.querySelectorAll('[data-game]').forEach((b) => (b.onclick = () => startGame(b.dataset.game)));
+
+// ---------- 꾸미기 ----------
+function buildLookSheet() {
+  const box = $('#lookRows');
+  box.replaceChildren();
+  const rows = [
+    ['style', '머리 모양'],
+    ['hair', '머리 색'],
+    ['shirt', '상의'],
+    ['pants', '하의'],
+    ['acc', '소품'],
+  ];
+  for (const [key, label] of rows) {
+    const row = document.createElement('div');
+    row.className = 'lookRow';
+    const h = document.createElement('div');
+    h.className = 'lookLabel';
+    h.textContent = label;
+    const opts = document.createElement('div');
+    opts.className = 'lookOpts';
+    LOOK_OPTS[key].forEach((v, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      if (Array.isArray(v)) {
+        b.className = 'chip';
+        b.textContent = v[1];
+      } else {
+        b.className = 'swatch';
+        b.style.background = '#' + v.toString(16).padStart(6, '0');
+        b.setAttribute('aria-label', label + ' ' + (i + 1));
+      }
+      b.classList.toggle('on', myLookIdx[key] === i);
+      b.onclick = () => {
+        myLookIdx = { ...myLookIdx, [key]: i };
+        applyMyLook();
+        buildLookSheet();
+      };
+      opts.appendChild(b);
+    });
+    row.append(h, opts);
+    box.appendChild(row);
+  }
+}
+function applyMyLook() {
+  me.setLook(lookFromIdx(myLookIdx));
+  try {
+    localStorage.setItem('pungsok-look', encodeLook(myLookIdx));
+  } catch (e) {}
+  send('look', { lk: encodeLook(myLookIdx) });
+}
+$('#lookClose').onclick = () => $('#lookSheet').classList.remove('show');
+
+// ---------- 오늘의 기록 ----------
+function openStats() {
+  const t = soloTitle(stats);
+  let title = t.name;
+  let desc = t.desc;
+  const friends = $('#statFriends');
+  friends.replaceChildren();
+  if (MULTI && peers.size) {
+    const list = [{ id: MY_ID, name: myName + ' (나)', stats }, ...[...peers.values()].map((r) => ({ id: r.id, name: r.p.name, stats: r.p.stats || emptyStats() }))];
+    const titled = roomTitles(list);
+    const mine = titled.find((x) => x.id === MY_ID);
+    if (mine.title !== title) {
+      title = mine.title;
+      desc = '오늘 이 방에서 제일!';
+    }
+    for (const x of titled) {
+      const li = document.createElement('div');
+      li.className = 'billRow';
+      li.innerHTML = '<span></span><b></b>';
+      li.children[0].textContent = x.name;
+      li.children[1].textContent = x.title;
+      friends.appendChild(li);
+    }
+  }
+  $('#statTitle').textContent = title;
+  $('#statDesc').textContent = desc;
+  $('#statName').textContent = MULTI ? myName : '오늘의 나';
+  const grid = $('#statGrid');
+  grid.replaceChildren(
+    ...STAT_LABELS.map(([k, label, unit]) => {
+      const c = document.createElement('div');
+      c.className = 'statCell';
+      c.innerHTML = '<b></b><span></span>';
+      c.children[0].textContent = k === 'flex' ? won(stats[k]) : `${stats[k]}${unit}`;
+      c.children[1].textContent = label;
+      return c;
+    })
+  );
+  $('#statDate').textContent = new Date().toLocaleDateString('ko-KR') + ' · 풍속의 밤';
+  $('#statSheet').classList.add('show');
+}
+$('#statClose').onclick = () => $('#statSheet').classList.remove('show');
+
+// ---------- 방 관리 ----------
+const bannedIds = new Set();
+
+function openRoom() {
+  const host = isHost();
+  $('#roomInfoCode').textContent = ROOM + (roomPwHash ? ' (비밀번호 있음)' : '');
+  $('#roomHostName').textContent = host ? '나' : peers.get(hostId()) ? peers.get(hostId()).p.name : '';
+  $('#roomHostOnly').hidden = !host;
+  $('#roomGuest').hidden = host;
+  const list = $('#roomPeople');
+  list.replaceChildren();
+  for (const r of peers.values()) {
+    const li = document.createElement('div');
+    li.className = 'billRow';
+    li.innerHTML = '<span></span>';
+    li.children[0].textContent = r.p.name;
+    if (host) {
+      const b = document.createElement('button');
+      b.className = 'mini danger';
+      b.textContent = '내보내기';
+      b.onclick = () => {
+        $('#roomSheet').classList.remove('show');
+        send('ban', { id: r.id });
+        applyBan(r.id);
+      };
+      li.appendChild(b);
+    }
+    list.appendChild(li);
+  }
+  if (!peers.size) list.textContent = '아직 들어온 친구가 없어요';
+  $('#roomSheet').classList.add('show');
+}
+
+function applyBan(id) {
+  if (id === MY_ID) {
+    me.banned = true;
+    me.locked = true;
+    me.lockedAt = simT;
+    endNausea();
+    toast('방장이 나가라고 했어요...');
+    bossRage(me);
+    later(1.4, () => requestKick(me));
+    return;
+  }
+  const r = peers.get(id);
+  if (!r) return bannedIds.add(id);
+  r.p.banned = true;
+  bossRage(r.p);
+  later(1.4, () => requestKick(r.p));
+  logSystem(`방장이 ${r.p.name}님을 내보냈어요`);
+}
+
+function showBanned() {
+  if (net) net.close();
+  net = null;
+  $('#banned').hidden = false;
+}
+
+function bossResetNow() {
+  boss.mood = boss.sulky ? boss.mood : 100;
+  setBossMood(100);
+  bartender.faceMood = null;
+  say(bartender, '...자, 다시 시작해 봅시다. 어서오세요~', 2.4);
+}
+
+$('#roomPwSet').onclick = () => {
+  if (!isHost()) return;
+  const pw = $('#roomPwNew').value.trim();
+  const h = pw ? hashText(pw) : '';
+  myPw = pw;
+  send('pw', { h });
+  // 알림이 다 나간 뒤에 옮긴다
+  setTimeout(() => switchChannel(h), 700);
+  toast(pw ? '비밀번호를 바꿨어요. 새 초대 링크를 보내 주세요' : '비밀번호를 없앴어요');
+  $('#roomSheet').classList.remove('show');
+};
+$('#roomBossReset').onclick = () => {
+  if (!isHost()) return;
+  send('bossReset');
+  bossResetNow();
+  $('#roomSheet').classList.remove('show');
+};
+$('#roomClose').onclick = () => $('#roomSheet').classList.remove('show');
+
+// ---------- 메뉴 ----------
+$('#bMenu').onclick = () => {
+  $('#menuRoom').hidden = !MULTI;
+  $('#menuInvite').hidden = !MULTI;
+  $('#menuSheet').classList.add('show');
+};
+$('#mainMenuClose').onclick = () => $('#menuSheet').classList.remove('show');
+$('#menuLook').onclick = () => {
+  $('#menuSheet').classList.remove('show');
+  buildLookSheet();
+  $('#lookSheet').classList.add('show');
+};
+$('#menuStats').onclick = () => {
+  $('#menuSheet').classList.remove('show');
+  openStats();
+};
+$('#menuRoom').onclick = () => {
+  $('#menuSheet').classList.remove('show');
+  openRoom();
+};
+$('#menuInvite').onclick = () => {
+  $('#menuSheet').classList.remove('show');
+  copyInvite();
+};
+$('#bBill').onclick = () => {
+  menuBox.classList.remove('show');
+  openBill();
+};
+$('#billDutch').onclick = () => payBill('dutch');
+$('#billFlex').onclick = () => payBill('flex');
+$('#billClose').onclick = () => $('#bill').classList.remove('show');
+
+// 클립보드를 못 쓸 때 링크를 보여 주는 창
+function showInfo(title, text) {
+  $('#infoTitle').textContent = title;
+  $('#infoText').value = text;
+  $('#info').classList.add('show');
+  setTimeout(() => $('#infoText').select(), 50);
+}
+$('#infoClose').onclick = () => $('#info').classList.remove('show');
+
+// 사장님 기분은 조금씩 회복된다
 let regenAcc = 0;
+let regenTick = 0;
 function bossRegen(dt) {
   regenAcc += dt;
   if (regenAcc < 1) return;
   regenAcc = 0;
-  if (boss.mood < 100) setBossMood(boss.mood + (boss.sulky ? 1 : 2));
+  // 짜증은 천천히 가라앉는다(2초에 1). 삐졌을 때는 풀리라고 1초에 1
+  regenTick = (regenTick + 1) % 2;
+  if (boss.mood < 100 && (boss.sulky || regenTick === 0)) setBossMood(boss.mood + 1);
 }
 
 let simT = 0;
@@ -1479,7 +2403,11 @@ function tick(dt) {
   syncChatRoom();
   bossRegen(dt);
   bartenderUpdate(dt);
-  for (const p of people) p.update(dt, p === bartender ? null : W.obstacles, p === bartender ? null : p === me || p.remote ? ME_BOUNDS : W.bounds);
+  wcUpdate();
+  games.update();
+  gameWatchdog();
+  nauseaUpdate();
+  for (const p of people) p.update(dt, p === bartender || p.noClip ? null : W.obstacles, p === bartender ? null : p === me || p.remote ? ME_BOUNDS : W.bounds);
   W.update(dt, t);
 
   for (let i = rings.length - 1; i >= 0; i--) {
@@ -1508,7 +2436,8 @@ function tick(dt) {
   lastTarget.copy(controls.target);
   controls.update();
   // 많이 마시면 화면이 살짝 흔들린다
-  if (me.blush >= 3) camera.rotateZ(Math.sin(t * 0.9) * 0.012);
+  const sway = [0, 0, 0.006, 0.014][me.blush];
+  if (sway) camera.rotateZ(Math.sin(t * 0.9) * sway + (nausea ? Math.sin(t * 2.3) * 0.01 : 0));
 }
 
 function frame() {
@@ -1554,4 +2483,4 @@ if (document.fonts && document.fonts.load) {
 }
 
 // 확인용. 주소에 ?debug 를 붙였을 때만 연다
-if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => server.jobs.push({ table: me.seat.table, kind }), startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };
+if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => server.jobs.push({ table: me.seat.table, kind }), startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };

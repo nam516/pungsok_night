@@ -118,6 +118,22 @@ function signTexture() {
   });
 }
 
+// 화장실 문 위 표지판
+function wcSignTexture() {
+  return canvasTex(256, 96, (g, w, h) => {
+    g.fillStyle = '#2a1c12';
+    g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#c49a62';
+    g.lineWidth = 4;
+    g.strokeRect(4, 4, w - 8, h - 8);
+    g.fillStyle = '#ffe1b8';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '700 40px "Gowun Dodum", sans-serif';
+    g.fillText('화장실 WC', w / 2, h / 2 + 2);
+  });
+}
+
 function blobTexture() {
   return canvasTex(128, 128, (g) => {
     const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
@@ -438,6 +454,77 @@ export function buildWorld(scene) {
   scene.add(strandMesh);
   W.strands = { mesh: strandMesh, n: strandPts.length, ph: strandPts.map(() => Math.random() * 10) };
 
+  // 화장실. 왼쪽 벽에 붙은 작은 칸이고 문은 가게 쪽(+x)으로 열린다
+  // 지붕이 있어서 위에서 내려다보면 안이 보이지 않는다
+  {
+    const X0 = -HX, X1 = -8.5, Z0 = 0, Z1 = 1.9, H = 2.3, DOOR_W = 0.8, DOOR_H = 1.9;
+    const DZ0 = (Z0 + Z1) / 2 - DOOR_W / 2;
+    const boothM = std(0x4a3020, { roughness: 0.8 });
+    const trimM = std(0x7a4f2e, { roughness: 0.6 });
+    const box = (w, h, d, x, y, z, m = boothM) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = mesh.receiveShadow = true;
+      scene.add(mesh);
+      return mesh;
+    };
+    const cx = (X0 + X1) / 2;
+    box(X1 - X0, H, 0.08, cx, H / 2, Z0);
+    box(X1 - X0, H, 0.08, cx, H / 2, Z1);
+    box(0.08, H, DZ0 - Z0, X1, H / 2, (Z0 + DZ0) / 2);
+    box(0.08, H, Z1 - DZ0 - DOOR_W, X1, H / 2, (DZ0 + DOOR_W + Z1) / 2);
+    box(0.08, H - DOOR_H, DOOR_W, X1, (H + DOOR_H) / 2, DZ0 + DOOR_W / 2);
+    box(X1 - X0 + 0.2, 0.1, Z1 - Z0 + 0.2, cx + 0.1, H + 0.05, (Z0 + Z1) / 2, trimM);
+    // 안의 변기
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.4, 16), std(0xf4f1ea, { roughness: 0.4 }));
+    bowl.position.set(X0 + 0.35, 0.2, (Z0 + Z1) / 2);
+    scene.add(bowl);
+
+    // 문. 경첩을 축으로 돈다
+    const hinge = new THREE.Group();
+    hinge.position.set(X1, 0, DZ0);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.05, DOOR_H, DOOR_W), trimM);
+    door.position.set(0, DOOR_H / 2, DOOR_W / 2);
+    door.castShadow = true;
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), std(0xd9a93a, { metalness: 0.6, roughness: 0.4 }));
+    knob.position.set(0.05, 1.0, DOOR_W - 0.12);
+    hinge.add(door, knob);
+    scene.add(hinge);
+
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.28), new THREE.MeshBasicMaterial({ map: wcSignTexture() }));
+    sign.position.set(X1 + 0.05, H - 0.2, (Z0 + Z1) / 2);
+    sign.rotation.y = Math.PI / 2;
+    scene.add(sign);
+    // 사용 중 표시등. 비면 초록, 쓰는 중이면 빨강
+    const lampMat = new THREE.MeshBasicMaterial({ color: 0x55ff88 });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), lampMat);
+    lamp.position.set(X1 + 0.06, H - 0.2, (Z0 + Z1) / 2 + 0.48);
+    scene.add(lamp);
+
+    W.obstacles.push({ x0: X0, x1: X1 + 0.25, z0: Z0 - 0.25, z1: Z1 + 0.25 });
+    W.wc = {
+      front: { x: X1 + 0.55, z: (Z0 + Z1) / 2 },
+      inside: { x: X0 + 0.75, z: (Z0 + Z1) / 2 },
+      top: new THREE.Vector3(cx, H + 0.2, (Z0 + Z1) / 2),
+      user: null,
+      open: 0,
+      openTarget: 0,
+      rattle: 0,
+      setBusy(b) {
+        lampMat.color.set(b ? 0xff4444 : 0x55ff88).multiplyScalar(2);
+      },
+    };
+    W.wc.setBusy(false);
+    W.wc.update = (dt, t) => {
+      const c = W.wc;
+      c.open += (c.openTarget - c.open) * (1 - Math.exp(-dt * 8));
+      // 안에서 힘주거나 토하면 문이 덜컹거린다
+      const shake = c.rattle > 0 ? Math.sin(t * 40) * 0.03 : 0;
+      c.rattle = Math.max(0, c.rattle - dt);
+      hinge.rotation.y = c.open * 1.4 + shake;
+    };
+  }
+
   // 구석 화분
   const potM = std(0x8a5a3a, { roughness: 0.9 });
   const bigLeaf = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 });
@@ -502,7 +589,22 @@ export function buildWorld(scene) {
     }
   };
 
+  // 화장실 냄새. 초록빛 김이 지붕 위로 피어오른다
+  const stinks = [];
+  W.stink = (p, dur) => stinks.push({ x: p.x, y: p.y, z: p.z, left: dur, acc: 0 });
+
   W.update = (dt, t) => {
+    W.wc.update(dt, t);
+    for (let i = stinks.length - 1; i >= 0; i--) {
+      const st = stinks[i];
+      st.left -= dt;
+      st.acc += dt;
+      if (st.acc > 0.12) {
+        st.acc = 0;
+        steam.emit(st.x + rnd(-0.6, 0.6), st.y, st.z + rnd(-0.8, 0.8), rnd(-0.1, 0.25), rnd(0.2, 0.4), rnd(-0.1, 0.1), rnd(1.8, 2.6), rnd(18, 28), 0.55, 0.78, 0.25, 0.32);
+      }
+      if (st.left <= 0) stinks.splice(i, 1);
+    }
     for (let i = 0; i < FN; i++) {
       const f = ff[i];
       const x = f.x + Math.sin(t * f.sp + f.ph) * 0.8;

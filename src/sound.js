@@ -369,6 +369,129 @@ export function createSound() {
       o.start(t);
       o.stop(t + 0.35);
     },
+    // 화장실 소리들
+    // 졸졸. 높은 대역 잡음이 오르내린다
+    pee(dur = 3) {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuf;
+      src.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 2600;
+      bp.Q.value = 1.5;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.5, t + 0.3);
+      for (let k = 0.4; k < dur - 0.4; k += 0.15) g.gain.setValueAtTime(0.35 + Math.random() * 0.25, t + k);
+      g.gain.linearRampToValueAtTime(0, t + dur);
+      src.connect(bp).connect(g).connect(fxBus);
+      src.start(t);
+      src.stop(t + dur + 0.1);
+    },
+    // 끄응. 낮게 떨리는 목소리
+    strain() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(110, t);
+      o.frequency.linearRampToValueAtTime(140, t + 1.2);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 600;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.25, t + 0.15);
+      g.gain.setValueAtTime(0.25, t + 1.0);
+      g.gain.linearRampToValueAtTime(0, t + 1.3);
+      o.connect(lp).connect(g).connect(fxBus);
+      o.start(t);
+      o.stop(t + 1.35);
+    },
+    // 뿌직. 낮게 부르르 떠는 소리와 퐁당
+    plop() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(70, t);
+      o.frequency.linearRampToValueAtTime(45, t + 0.5);
+      const am = ctx.createOscillator();
+      am.frequency.value = 28;
+      const amG = ctx.createGain();
+      amG.gain.value = 0.15;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.2, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      am.connect(amG).connect(g.gain);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 400;
+      o.connect(lp).connect(g).connect(fxBus);
+      o.start(t);
+      am.start(t);
+      o.stop(t + 0.65);
+      am.stop(t + 0.65);
+      const d = ctx.createOscillator();
+      d.frequency.setValueAtTime(500, t + 0.7);
+      d.frequency.exponentialRampToValueAtTime(180, t + 0.85);
+      const dg = ctx.createGain();
+      dg.gain.setValueAtTime(0, t + 0.7);
+      dg.gain.linearRampToValueAtTime(0.3, t + 0.71);
+      dg.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+      d.connect(dg).connect(fxBus);
+      d.start(t + 0.7);
+      d.stop(t + 0.95);
+    },
+    // 우웩. 거칠게 올라가는 목소리와 쏟아지는 잡음
+    gag() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(160, t);
+      o.frequency.linearRampToValueAtTime(260, t + 0.25);
+      o.frequency.linearRampToValueAtTime(120, t + 0.8);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(700, t);
+      bp.frequency.linearRampToValueAtTime(1100, t + 0.3);
+      bp.Q.value = 2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.4, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.85);
+      o.connect(bp).connect(g).connect(fxBus);
+      o.start(t);
+      o.stop(t + 0.9);
+      noiseBurst(t + 0.25, 0.7, 'lowpass', 900, 0.7, 0.45);
+    },
+    // 물 내리는 소리
+    flush() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuf;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(3000, t);
+      lp.frequency.exponentialRampToValueAtTime(300, t + 1.8);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.6, t + 0.1);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 2);
+      src.connect(lp).connect(g).connect(fxBus);
+      src.start(t, Math.random() * 2);
+      src.stop(t + 2.05);
+    },
+    // 똑똑
+    knock() {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      for (let i = 0; i < 2; i++) noiseBurst(t + i * 0.18, 0.08, 'bandpass', 380, 3, 0.8);
+    },
     // 쪽. 짧게 올라가는 소리
     smooch() {
       if (!ready()) return;

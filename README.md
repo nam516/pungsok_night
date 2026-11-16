@@ -21,6 +21,9 @@ npm install → npm run build → dist 폴더를 올린다.
 ## 파일
 - src/main.js      장면 조립, 손님 행동, 버튼, 누르기, 카메라, 수다방, 같이 놀기
 - src/net.js       Supabase Realtime(또는 ?local 탭 간) 메시지 주고받기
+- src/games.js     술게임(복불복, 업다운, 369) 진행
+- src/looks.js     캐릭터 꾸미기 선택지
+- src/titles.js    오늘의 기록과 칭호
 - src/world.js     바닥, 잎 벽, 바, 테이블, 조명, 반딧불
 - src/person.js    2등신 캐릭터와 동작
 - src/dishes.js    안주와 술병

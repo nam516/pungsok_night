@@ -426,7 +426,7 @@ function lerpTo(cur, target, k) {
 
 export class Person {
   // makeup, outfit 은 조풍순처럼 따로 꾸민 캐릭터에만 준다. 기본 손님은 그대로
-  constructor({ hair = 0x3b2a22, style = 'bob', shirt = 0x6c8f6a, pants = 0x2f3a4a, staff = false, name = '', makeup = null, outfit = null, skirt = null, legs = null, shoes = 0x2a211d, skin: skinColor = SKIN } = {}) {
+  constructor({ hair = 0x3b2a22, style = 'bob', shirt = 0x6c8f6a, pants = 0x2f3a4a, staff = false, name = '', makeup = null, outfit = null, skirt = null, legs = null, shoes = 0x2a211d, skin: skinColor = SKIN, acc = 'none' } = {}) {
     this.name = name;
     this.makeup = makeup;
     this.staff = staff;
@@ -453,7 +453,8 @@ export class Person {
     this.idlePose = null;
 
     // 관절 현재값
-    this.j = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: 0, elR: 0, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0 };
+    // hy: 엉덩이를 좌우로 돌리는 각도(엉덩이 흔들기)
+    this.j = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: 0, elR: 0, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0 };
 
     // 따로 준 피부색은 주황 조명에 묻히지 않게 살짝 스스로 밝힌다
     const skin = skinColor === SKIN ? mat(SKIN, { roughness: 0.6 }) : mat(skinColor, { roughness: 0.6, emissive: 0x4a4242 });
@@ -461,7 +462,6 @@ export class Person {
     // 마담 차림은 반짝이는 드레스
     const shirtM = outfit === 'madam' ? mat(shirt, { metalness: 0.35, roughness: 0.35 }) : mat(shirt);
     const pantsM = mat(pants);
-    const hairM = mat(hair, { roughness: 0.55 });
     const shoeM = mat(shoes);
     let legM = legs ? mat(legs, { roughness: 0.45 }) : pantsM;
     if (outfit === 'madam') legM = new THREE.MeshStandardMaterial({ map: fishnetTexture(), roughness: 0.6 });
@@ -473,12 +473,16 @@ export class Person {
     this.root.add(this.hips);
 
     const hipBall = new THREE.Mesh(G.hipBall, skirt ? mat(skirt) : pantsM);
+    // 꾸미기에서 색을 바꿀 부위들
+    this.shirtParts = [];
+    this.pantsParts = skirt ? [] : [hipBall];
     hipBall.scale.set(1, 0.6, 0.9);
     this.hips.add(hipBall);
 
     this.torso = new THREE.Group();
     this.hips.add(this.torso);
     const torso = new THREE.Mesh(G.torso, shirtM);
+    this.shirtParts.push(torso);
     torso.position.y = 0.13;
     torso.scale.set(1.05, 1, 0.9);
     this.torso.add(torso);
@@ -502,45 +506,17 @@ export class Person {
     face.renderOrder = 2;
     headShape.add(face);
 
-    const hairBack = new THREE.Mesh(G.hair, hairM);
-    hairBack.position.set(0, 0.03, -0.035);
-    headShape.add(hairBack);
-    const bangs = new THREE.Mesh(G.bangs, hairM);
-    bangs.position.y = 0.005;
-    headShape.add(bangs);
-    if (style === 'bun') {
-      const bun = new THREE.Mesh(G.bun, hairM);
-      bun.position.set(0, 0.25, -0.1);
-      headShape.add(bun);
-    } else if (style === 'pony') {
-      const tail = new THREE.Mesh(G.tail, hairM);
-      tail.position.set(0, 0.02, -0.27);
-      tail.rotation.x = 0.35;
-      headShape.add(tail);
-    } else if (style === 'short') {
-      hairBack.scale.set(1, 0.9, 1);
-      hairBack.position.y = 0.06;
-    } else if (style === 'madam') {
-      // 부풀린 올림머리와 옆 웨이브
-      hairBack.scale.set(1.1, 1.08, 1.06);
-      const top = new THREE.Mesh(G.bun, hairM);
-      top.scale.setScalar(1.6);
-      top.position.set(0, 0.27, -0.06);
-      headShape.add(top);
-      for (const sx of [-1, 1]) {
-        const curl = new THREE.Mesh(G.bun, hairM);
-        curl.scale.setScalar(0.9);
-        curl.position.set(0.24 * sx, -0.1, -0.06);
-        headShape.add(curl);
-      }
-    }
+    this.headShape = headShape;
+    this.buildHair(style, hair);
+    this.accGroup = new THREE.Group();
+    headShape.add(this.accGroup);
+    this.buildAcc(acc);
     if (staff && !outfit) {
       const band = new THREE.Mesh(new THREE.TorusGeometry(0.255, 0.025, 8, 32), mat(0x2d4a33));
       band.rotation.x = Math.PI / 2 - 0.25;
       band.position.y = 0.1;
       headShape.add(band);
     }
-    this.headShape = headShape;
 
     // 팔
     const arm = (side) => {
@@ -551,6 +527,7 @@ export class Person {
       const tw = new THREE.Group();
       sh.add(tw);
       const up = new THREE.Mesh(G.upperArm, sleeveM);
+      if (sleeveM === shirtM) this.shirtParts.push(up);
       up.position.y = -0.07;
       tw.add(up);
       const el = new THREE.Group();
@@ -575,12 +552,14 @@ export class Person {
       hp.position.set(0.07 * side, 0, 0);
       this.hips.add(hp);
       const th = new THREE.Mesh(G.thigh, legM);
+      if (legM === pantsM) this.pantsParts.push(th);
       th.position.y = -0.06;
       hp.add(th);
       const kn = new THREE.Group();
       kn.position.y = -0.12;
       hp.add(kn);
       const sh = new THREE.Mesh(G.shin, legM);
+      if (legM === pantsM) this.pantsParts.push(sh);
       sh.position.y = -0.05;
       kn.add(sh);
       const ft = new THREE.Mesh(G.foot, shoeM);
@@ -694,6 +673,90 @@ export class Person {
     headShape.add(flower);
   }
 
+  // 머리 모양. 꾸미기로 바꿀 수 있게 따로 묶어 둔다
+  buildHair(style, color) {
+    if (this.hairGroup) this.headShape.remove(this.hairGroup);
+    const g = new THREE.Group();
+    const hairM = mat(color, { roughness: 0.55 });
+    const add = (geo, x, y, z, sc) => {
+      const m = new THREE.Mesh(geo, hairM);
+      m.position.set(x, y, z);
+      if (sc) m.scale.copy(sc);
+      m.castShadow = true;
+      g.add(m);
+      return m;
+    };
+    const back = add(G.hair, 0, 0.03, -0.035);
+    add(G.bangs, 0, 0.005, 0);
+    if (style === 'bun') add(G.bun, 0, 0.25, -0.1);
+    else if (style === 'pony') add(G.tail, 0, 0.02, -0.27).rotation.x = 0.35;
+    else if (style === 'short') {
+      back.scale.set(1, 0.9, 1);
+      back.position.y = 0.06;
+    } else if (style === 'madam') {
+      // 부풀린 올림머리와 옆 웨이브
+      back.scale.set(1.1, 1.08, 1.06);
+      add(G.bun, 0, 0.27, -0.06, new THREE.Vector3(1.6, 1.6, 1.6));
+      for (const sx of [-1, 1]) add(G.bun, 0.24 * sx, -0.1, -0.06, new THREE.Vector3(0.9, 0.9, 0.9));
+    } else if (style === 'twin') {
+      for (const sx of [-1, 1]) add(G.tail, 0.22 * sx, -0.05, -0.1).rotation.z = -0.4 * sx;
+    }
+    this.hairGroup = g;
+    this.headShape.add(g);
+  }
+
+  // 소품. 안경, 선글라스, 모자, 머리띠
+  buildAcc(acc) {
+    this.accGroup.clear();
+    if (acc === 'glasses' || acc === 'shades') {
+      const frame = mat(acc === 'shades' ? 0x111111 : 0x2a1a12, { roughness: 0.4 });
+      for (const sx of [-1, 1]) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.008, 6, 20), frame);
+        ring.position.set(0.065 * sx, 0.025, 0.252);
+        this.accGroup.add(ring);
+        if (acc === 'shades') {
+          const lens = new THREE.Mesh(new THREE.CircleGeometry(0.045, 20), mat(0x0a0a0a, { roughness: 0.2 }));
+          lens.position.set(0.065 * sx, 0.025, 0.256);
+          lens.renderOrder = 3;
+          this.accGroup.add(lens);
+        }
+      }
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.008, 0.008), frame);
+      bridge.position.set(0, 0.03, 0.256);
+      this.accGroup.add(bridge);
+    } else if (acc === 'hat') {
+      const hm = mat(0x2b2b30, { roughness: 0.8 });
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.16, 20), hm);
+      crown.position.y = 0.27;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.02, 24), hm);
+      brim.position.y = 0.19;
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.192, 0.192, 0.035, 20), mat(0xb3123c));
+      band.position.y = 0.215;
+      this.accGroup.add(crown, brim, band);
+      this.accGroup.rotation.x = -0.12;
+    } else if (acc === 'band') {
+      const b = new THREE.Mesh(new THREE.TorusGeometry(0.262, 0.022, 8, 32), mat(0xff6fae));
+      b.rotation.x = Math.PI / 2 - 0.35;
+      b.position.y = 0.11;
+      const bow = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), mat(0xff6fae));
+      bow.scale.set(1.6, 1, 0.6);
+      bow.position.set(0.14, 0.24, 0.05);
+      this.accGroup.add(b, bow);
+    }
+    if (acc !== 'hat') this.accGroup.rotation.x = 0;
+    this.accGroup.traverse((o) => o.isMesh && (o.castShadow = true));
+  }
+
+  // 꾸미기 적용. { style, hair, shirt, pants, acc }
+  setLook(look) {
+    this.buildHair(look.style, look.hair);
+    this.buildAcc(look.acc || 'none');
+    const sm = mat(look.shirt);
+    const pm = mat(look.pants);
+    for (const m of this.shirtParts) m.material = sm;
+    for (const m of this.pantsParts) m.material = pm;
+  }
+
   get pos() {
     return this.root.position;
   }
@@ -707,7 +770,7 @@ export class Person {
   }
 
   do(type, dur) {
-    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
+    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
     this.action = { type, t: 0, dur: dur || D[type] || 1.5, fired: false };
   }
 
@@ -750,7 +813,7 @@ export class Person {
   update(dt, obstacles, bounds) {
     this.t += dt;
     const j = this.j;
-    const tgt = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: -0.1, elR: -0.1, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0 };
+    const tgt = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: -0.1, elR: -0.1, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0 };
     const tipsy = this.blush;
 
     // 걷기
@@ -759,7 +822,8 @@ export class Person {
       const dx = p.x - this.root.position.x;
       const dz = p.z - this.root.position.z;
       const d = Math.hypot(dx, dz);
-      const step = this.speed * dt;
+      // 많이 취하면 걸음이 느려진다
+      const step = this.speed * dt * (tipsy >= 3 ? 0.75 : 1);
       if (d <= step) {
         this.root.position.x = p.x;
         this.root.position.z = p.z;
@@ -774,6 +838,13 @@ export class Person {
         this.root.position.x += (dx / d) * step;
         this.root.position.z += (dz / d) * step;
         this.targetYaw = Math.atan2(dx, dz);
+        // 취하면 옆으로 왔다 갔다 하며 걷는다. 평균은 0이라 길에서 벗어나지 않는다
+        if (tipsy >= 2) {
+          const side = Math.sin(this.t * 3.2) * 0.9 * (tipsy - 1) * dt;
+          this.root.position.x += (dz / d) * side;
+          this.root.position.z -= (dx / d) * side;
+          this.targetYaw += Math.sin(this.t * 3.2) * 0.25 * (tipsy - 1);
+        }
       }
       if (obstacles) pushOut(this.root.position, obstacles);
       if (bounds) {
@@ -925,23 +996,22 @@ export class Person {
         tgt.nx = -0.15;
         tgt.lean = mix(tgt.lean, -0.08, 1);
       } else if (a.type === 'yeah') {
-        // 팔을 ㄴ 자로 굽히고(위팔은 아래, 아랫팔은 앞) 번갈아 앞뒤로 흔든다. 몸도 같이 들썩인다
+        // 앞으로 푹 숙여 엉덩이를 뒤로 빼고, 두 팔은 앞으로 둥글게 내민 채 엉덩이를 씰룩씰룩
         const w = inOut(0, 0.1, 0.9, 1);
-        const swing = Math.sin(this.t * 9);
-        tgt.slx = mix(tgt.slx, swing * 0.6, w);
-        tgt.srx = mix(tgt.srx, -swing * 0.6, w);
-        tgt.slz = mix(tgt.slz, 0.18, w);
-        tgt.srz = mix(tgt.srz, -0.18, w);
-        tgt.elL = mix(tgt.elL, -1.6, w);
-        tgt.elR = mix(tgt.elR, -1.6, w);
-        const sway = Math.sin(this.t * 4.5);
-        tgt.roll = sway * 0.12 * w;
-        tgt.nz = -sway * 0.08 * w;
-        tgt.nx = -0.12 * w;
-        tgt.bob += Math.abs(swing) * 0.025 * w;
-        tgt.kl = mix(tgt.kl, Math.max(0, swing) * 0.25, w);
-        tgt.kr = mix(tgt.kr, Math.max(0, -swing) * 0.25, w);
-        mood = 'happy';
+        const wig = Math.sin(this.t * 13);
+        tgt.lean = mix(tgt.lean, 0.62, w);
+        tgt.hl = tgt.hr = mix(tgt.hl, -0.75, w);
+        tgt.kl = tgt.kr = mix(tgt.kl, 0.85, w);
+        tgt.bob += -0.05 * w + Math.abs(wig) * 0.012 * w;
+        tgt.hy = wig * 0.38 * w;
+        tgt.slx = tgt.srx = mix(tgt.slx, -1.35 + Math.sin(this.t * 6.5) * 0.12, w);
+        tgt.slz = mix(tgt.slz, -0.12, w);
+        tgt.srz = mix(tgt.srz, 0.12, w);
+        tgt.elL = tgt.elR = mix(tgt.elL, -0.7, w);
+        // 고개는 들어서 앞을 본다
+        tgt.nx = mix(tgt.nx, -0.55, w);
+        tgt.nz = -wig * 0.06 * w;
+        mood = 'talk';
       } else if (a.type === 'tantrum') {
         // 진상. 앉아 있으면 테이블을 두드리고, 서 있으면 발을 구르며 팔을 휘두른다
         const w = inOut(0, 0.08, 0.9, 1);
@@ -975,6 +1045,31 @@ export class Person {
         this.openHand.visible = open;
         this.armR.palm.visible = !open;
         mood = this.faceMood === 'fury' ? 'fury' : 'serious';
+      } else if (a.type === 'clap') {
+        // 짝! 두 손을 가슴 앞에서 마주친다
+        const w = inOut(0, 0.25, 0.6, 1);
+        const hit = Math.abs(Math.sin(p * Math.PI * 2));
+        tgt.slx = tgt.srx = mix(tgt.slx, -1.25, w);
+        tgt.slz = mix(tgt.slz, -0.25 + hit * 0.35, w);
+        tgt.srz = mix(tgt.srz, 0.25 - hit * 0.35, w);
+        tgt.elL = tgt.elR = mix(tgt.elL, -0.9, w);
+        mood = 'happy';
+      } else if (a.type === 'puke') {
+        // 바닥에 토한다. 허리를 숙이고 몸이 들썩인다
+        const w = inOut(0, 0.12, 0.85, 1);
+        const heave = Math.max(0, Math.sin(this.t * 9));
+        tgt.lean = mix(tgt.lean, 0.75 + heave * 0.12, w);
+        tgt.nx = mix(tgt.nx, 0.35, w);
+        tgt.slx = tgt.srx = mix(tgt.slx, -0.5, w);
+        tgt.elL = tgt.elR = mix(tgt.elL, -0.3, w);
+        tgt.kl = tgt.kr = mix(tgt.kl, 0.45, w);
+        tgt.hl = tgt.hr = mix(tgt.hl, -0.4, w);
+        tgt.bob += -0.05 * w + heave * 0.02 * w;
+        mood = 'drink';
+        if (!a.fired && p > 0.3) {
+          a.fired = true;
+          this.onPuke && this.onPuke(this);
+        }
       } else if (a.type === 'warn') {
         // 손을 들어 상대 쪽으로 좌우로 흔든다. 그러지 마세요
         const w = inOut(0, 0.15, 0.85, 1);
@@ -1062,7 +1157,9 @@ export class Person {
     for (const key in tgt) j[key] = lerpTo(j[key], tgt[key], k);
 
     this.hips.position.y = HIP_Y + j.bob;
-    this.torso.rotation.set(j.lean, 0, j.roll);
+    this.hips.rotation.y = j.hy;
+    // 엉덩이만 돌고 윗몸은 앞을 보도록 반대로 돌린다
+    this.torso.rotation.set(j.lean, -j.hy * 0.8, j.roll);
     this.neck.rotation.set(j.nx, j.ny, j.nz);
     this.armL.sh.rotation.set(j.slx, 0, j.slz);
     this.armR.sh.rotation.set(j.srx, 0, j.srz);
