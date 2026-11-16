@@ -22,6 +22,9 @@ const G = {
   foot: new THREE.SphereGeometry(1, 12, 10),
   bun: new THREE.SphereGeometry(0.1, 16, 12),
   tail: new THREE.CapsuleGeometry(0.07, 0.14, 4, 10),
+  longBack: new THREE.CapsuleGeometry(0.2, 0.3, 6, 16),
+  lock: new THREE.CapsuleGeometry(0.055, 0.22, 4, 10),
+  curl: new THREE.SphereGeometry(0.05, 10, 8),
   apron: new THREE.BoxGeometry(0.24, 0.26, 0.02),
   pick: new THREE.CylinderGeometry(0.3, 0.3, 1.2, 8),
 };
@@ -520,14 +523,18 @@ export class Person {
     const skin = skinColor === SKIN ? mat(SKIN, { roughness: 0.6 }) : mat(skinColor, { roughness: 0.6, emissive: 0x4a4242 });
     this.skinM = skin;
     // 마담 차림은 반짝이는 드레스, 캬바레 차림은 무늬 있는 번쩍이는 셔츠
-    let shirtM = outfit === 'madam' ? mat(shirt, { metalness: 0.35, roughness: 0.35 }) : mat(shirt);
+    let shirtM = outfit === 'madam' || outfit === 'dress' ? mat(shirt, { metalness: 0.35, roughness: 0.35 }) : mat(shirt);
+    // 롱패딩은 반질반질한 겉감
+    if (outfit === 'padding') shirtM = mat(shirt, { metalness: 0.25, roughness: 0.32 });
     if (outfit === 'cabaret') shirtM = new THREE.MeshStandardMaterial({ map: cabaretTexture(), metalness: 0.15, roughness: 0.3, emissive: 0xffffff, emissiveMap: cabaretTexture(), emissiveIntensity: 0.12 });
     const pantsM = mat(pants);
     const shoeM = mat(shoes);
     let legM = legs ? mat(legs, { roughness: 0.45 }) : pantsM;
     if (outfit === 'madam') legM = new THREE.MeshStandardMaterial({ map: fishnetTexture(), roughness: 0.6 });
+    // 원피스는 맨다리
+    if (outfit === 'dress') legM = skin;
     // 민소매면 위팔도 맨살
-    const sleeveM = outfit === 'madam' ? skin : shirtM;
+    const sleeveM = outfit === 'madam' || outfit === 'dress' ? skin : shirtM;
 
     this.hips = new THREE.Group();
     this.hips.position.y = HIP_Y;
@@ -633,6 +640,8 @@ export class Person {
     this.legR = leg(-1);
 
     if (outfit === 'madam') this.addMadamOutfit(headShape);
+    if (outfit === 'dress') this.addDressOutfit(headShape, shirtM);
+    if (outfit === 'padding') this.addPadding(torso, shirtM);
     if (outfit === 'cabaret') this.addCabaretOutfit();
 
     this.root.traverse((o) => {
@@ -735,6 +744,75 @@ export class Person {
     headShape.add(flower);
   }
 
+  // 롱패딩. 빵빵한 몸통에 누빔 줄, 무릎까지 오는 기장, 털 달린 모자
+  addPadding(torso, padM) {
+    torso.scale.set(1.3, 1.12, 1.15);
+    const lineM = mat(0x0a0c14, { roughness: 0.6 });
+    for (const y of [0.04, 0.1, 0.16, 0.22]) {
+      const r = new THREE.Mesh(new THREE.TorusGeometry(0.162 - Math.abs(y - 0.13) * 0.3, 0.016, 6, 28), lineM);
+      r.rotation.x = Math.PI / 2;
+      r.position.y = y;
+      this.torso.add(r);
+    }
+    // 무릎까지 덮는 아랫단
+    const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.2, 0.24, 24), padM);
+    hem.position.y = -0.08;
+    this.hips.add(hem);
+    const hemLine = new THREE.Mesh(new THREE.TorusGeometry(0.183, 0.011, 6, 28), lineM);
+    hemLine.rotation.x = Math.PI / 2;
+    hemLine.position.y = -0.08;
+    this.hips.add(hemLine);
+    // 팔도 빵빵하게
+    for (const a of [this.armL, this.armR]) {
+      a.tw.children[0].scale.setScalar(1.3);
+      const fo = a.el.children[0];
+      fo.material = padM;
+      fo.scale.setScalar(1.25);
+    }
+    // 털 달린 모자
+    const fur = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.045, 8, 24), mat(0xcbb79a, { roughness: 1 }));
+    fur.rotation.x = Math.PI / 2;
+    fur.position.set(0, 0.28, -0.02);
+    this.torso.add(fur);
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 10), padM);
+    hood.scale.set(1.1, 0.7, 0.8);
+    hood.position.set(0, 0.27, -0.14);
+    this.torso.add(hood);
+  }
+
+  // 손에 소주병을 든다
+  holdBottle() {
+    const g = new THREE.Group();
+    const m = mat(0x2f8a4a, { roughness: 0.35, transparent: true, opacity: 0.85 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.14, 12), m);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.03, 0.07, 10), m);
+    neck.position.y = 0.1;
+    g.add(body, neck);
+    g.position.y = -0.07;
+    g.rotation.x = Math.PI;
+    this.armR.hand.add(g);
+    this.bottle = g;
+  }
+
+  // 민소매 미니 원피스. 퍼지는 치마, 가는 금색 허리띠, 금 링 귀걸이
+  addDressOutfit(headShape, dressM) {
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.22, 0.17, 24), dressM);
+    skirt.position.y = -0.06;
+    this.hips.add(skirt);
+    const gold = mat(0xd9a93a, { metalness: 0.6, roughness: 0.4 });
+    const belt = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.008, 6, 28), gold);
+    belt.rotation.x = Math.PI / 2;
+    belt.position.y = 0.035;
+    this.hips.add(belt);
+    const hoopGeo = new THREE.TorusGeometry(0.04, 0.007, 6, 16);
+    for (const sx of [-1, 1]) {
+      const hoop = new THREE.Mesh(hoopGeo, gold);
+      hoop.position.set(0.255 * sx, -0.1, 0.03);
+      hoop.rotation.y = Math.PI / 2;
+      headShape.add(hoop);
+    }
+  }
+
   // 캬바레 셔츠. 소매 색이 서로 다르고 카라는 보라
   addCabaretOutfit() {
     const satin = (c) => mat(new THREE.Color(c).getHex(), { metalness: 0.15, roughness: 0.3, emissive: new THREE.Color(c).multiplyScalar(0.12).getHex() });
@@ -782,6 +860,17 @@ export class Person {
       for (const sx of [-1, 1]) add(G.bun, 0.24 * sx, -0.1, -0.06, new THREE.Vector3(0.9, 0.9, 0.9));
     } else if (style === 'twin') {
       for (const sx of [-1, 1]) add(G.tail, 0.22 * sx, -0.05, -0.1).rotation.z = -0.4 * sx;
+    } else if (style === 'long' || style === 'wave') {
+      // 등까지 내려오는 긴 머리. 양옆은 어깨 앞으로 늘어뜨린다
+      back.scale.set(1.04, 1.02, 1.04);
+      add(G.longBack, 0, -0.2, -0.1, new THREE.Vector3(1.15, 1, 0.75));
+      for (const sx of [-1, 1]) {
+        const lock = add(G.lock, 0.2 * sx, -0.2, 0.03);
+        lock.rotation.z = 0.12 * sx;
+        // 웨이브는 끝을 동글동글 말아 준다
+        if (style === 'wave') for (let k = 0; k < 3; k++) add(G.curl, 0.21 * sx + (k % 2 ? 0.02 : -0.02) * sx, -0.14 - k * 0.09, 0.05);
+      }
+      if (style === 'wave') for (let k = 0; k < 4; k++) add(G.curl, (k - 1.5) * 0.09, -0.4, -0.12, new THREE.Vector3(1.3, 1.3, 1.3));
     }
     this.hairGroup = g;
     this.headShape.add(g);

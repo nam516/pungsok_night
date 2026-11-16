@@ -15,6 +15,7 @@ export const MENU = [
   { kind: 'jeongol', name: '전골' },
   { kind: 'chicken', name: '순살치킨' },
   { kind: 'shrimp', name: '새우튀김' },
+  { kind: 'hotteok', name: '호떡' },
 ];
 
 function plate(r = 0.2) {
@@ -92,6 +93,29 @@ export function makeDish(kind) {
     mayo.rotation.x = Math.PI / 2;
     mayo.position.y = 0.085;
     g.add(mayo);
+  }
+  if (kind === 'hotteok') {
+    // 노릇한 씨앗호떡 세 장. 가운데로 꿀이 흘러나온다
+    g.add(plate(0.2));
+    const cakeM = m('hotteok', 0xd7953e, { roughness: 0.75 });
+    const honeyM = m('honey', 0x8a4a14, { roughness: 0.3, emissive: 0x200c00 });
+    const seedM = m('seed', 0x3a2a1a, { roughness: 0.8 });
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      const cake = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.08, 0.026, 20), cakeM);
+      cake.position.set(Math.cos(a) * 0.07, 0.04 + i * 0.012, Math.sin(a) * 0.07);
+      cake.rotation.set((Math.random() - 0.5) * 0.15, 0, (Math.random() - 0.5) * 0.15);
+      g.add(cake);
+      const honey = new THREE.Mesh(new THREE.CircleGeometry(0.03, 12), honeyM);
+      honey.rotation.x = -Math.PI / 2;
+      honey.position.set(cake.position.x, cake.position.y + 0.014, cake.position.z);
+      g.add(honey);
+      for (let k = 0; k < 4; k++) {
+        const seed = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 4), seedM);
+        seed.position.set(honey.position.x + (Math.random() - 0.5) * 0.05, honey.position.y + 0.003, honey.position.z + (Math.random() - 0.5) * 0.05);
+        g.add(seed);
+      }
+    }
   }
   if (kind === 'refill') {
     // 오뎅 리필. 스테인리스 그릇에 꼬치가 한가득
