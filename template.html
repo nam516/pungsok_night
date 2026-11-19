@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>풍속의 밤</title>
+<title>스튜디오 풍논</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
@@ -45,7 +45,7 @@
   #bSound.off .w { display: none; }
 
   #actions { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 4px; padding: 6px; border-radius: 22px; }
-  #actions button { background: none; border: 0; padding: 8px 10px 6px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; min-width: 56px; transition: background 0.15s, transform 0.1s; }
+  #actions button { background: none; border: 0; padding: 8px 10px 6px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; min-width: 56px; word-break: keep-all; line-height: 1.15; transition: background 0.15s, transform 0.1s; }
   #actions button:hover { background: rgba(255, 210, 150, 0.12); }
   #actions button:active { transform: scale(0.94); }
   #actions svg { width: 24px; height: 24px; stroke: var(--warm); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -63,6 +63,20 @@
   .tag.peerTag { background: #cfe3ff; color: #1d2a44; }
   #chatLines .sys { opacity: 0.55; font-size: 12px; font-style: italic; }
   .tag.staffTag { background: #ff8fb1; color: #4a0f22; }
+  .tag.workTag { background: #8fe0d0; color: #0f3a32; }
+  #bldPill { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  #bldPill[hidden] { display: none !important; }
+  #bldPill b { color: var(--warm); }
+  #bldWho { opacity: 0.75; font-size: 12px; }
+  #elevSheet { background: rgba(28, 29, 33, 0.97); }
+  #elevList { gap: 0; }
+  #elevList button { display: grid; grid-template-columns: 46px 1fr; align-items: center; gap: 10px; text-align: left; background: none; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.4); border-radius: 0; padding: 9px 4px; color: #fff; }
+  #elevList button:hover { background: rgba(255, 255, 255, 0.07); }
+  #elevList button b { font: 700 30px/1 sans-serif; text-align: center; }
+  #elevList button span { font-size: 13px; line-height: 1.45; opacity: 0.92; }
+  #elevList button small { display: block; color: #8fe0d0; font-size: 12px; margin-top: 2px; }
+  #elevList button.here b { color: #ffd36f; }
+  body.inbld #bCheers, body.inbld #bTalk, body.inbld #bShot, body.inbld #bAnju, body.inbld #bGame, body.inbld #bWc, body.inbld #bJinsang, body.inbld #bOrder, body.inbld #bossWrap, body.inbld #menuTennis, body.inbld #menuEomuk, body.inbld #menuHd { display: none !important; }
   .tag.bossTag { background: #8f66ff; color: #fff; }
   .tag.fungTag { background: #e9b3ff; color: #3a0f4a; }
   .tag.hdTag { background: #ff6a4a; color: #fff; }
@@ -180,7 +194,7 @@
   #intro { position: fixed; inset: 0; display: flex; overflow-y: auto; background: radial-gradient(ellipse at center, rgba(10, 16, 11, 0.55), rgba(5, 8, 6, 0.92)); transition: opacity 0.6s; z-index: 10; padding: 20px; }
   #intro.hide { opacity: 0; pointer-events: none; }
   #intro .card { text-align: center; max-width: 340px; margin: auto; }
-  #intro h1 { font-family: "Nanum Pen Script", cursive; font-weight: 400; font-size: 64px; margin: 0; color: var(--warm); text-shadow: 0 0 24px rgba(255, 160, 90, 0.55); }
+  #intro h1 { font-family: "Nanum Pen Script", cursive; font-weight: 400; font-size: clamp(44px, 14vw, 64px); white-space: nowrap; margin: 0; color: var(--warm); text-shadow: 0 0 24px rgba(255, 160, 90, 0.55); }
   #intro p { margin: 6px 0 0; opacity: 0.82; line-height: 1.6; font-size: 14px; }
   #intro ul { list-style: none; padding: 0; margin: 18px 0 22px; font-size: 13px; opacity: 0.75; line-height: 1.9; }
   #multiBox { margin: 0 0 18px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
@@ -218,6 +232,7 @@
   <div id="brand">
     <div id="title" class="pill"><b>풍속의 밤</b><span id="count"></span></div>
     <div id="meterWrap" class="pill"><span>취기</span><div id="meter"><div id="meterFill"></div></div><span id="meterNum"></span></div>
+    <div id="bldPill" class="pill" hidden><b id="bldName"></b><span id="bldWho"></span></div>
     <div id="bossWrap" class="pill"><span>사장님 짜증</span><div id="bossBar"><div id="bossFill"></div></div><span id="bossState"></span></div>
   </div>
   <div id="tools">
@@ -237,6 +252,13 @@
   <button id="bGame"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h.01M15 9h.01M12 12h.01M9 15h.01M15 15h.01"/></svg>술게임</button>
   <button id="bWc"><svg viewBox="0 0 24 24"><path d="M7 3h6v6H7z"/><path d="M5 11h14a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6z"/><path d="M9 18l-1 3h7l-1-3"/></svg>화장실</button>
   <button id="bJinsang"><svg viewBox="0 0 24 24"><path d="M9 3.5c0 3 -2 5.5 -5.5 5.5M15 3.5c0 3 2 5.5 5.5 5.5M9 20.5c0 -3 -2 -5.5 -5.5 -5.5M15 20.5c0 -3 2 -5.5 5.5 -5.5"/></svg>진상</button>
+  <button id="bCoffee" hidden><svg viewBox="0 0 24 24"><path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16M8 3c0 1.5 1 1.5 1 3M12 3c0 1.5 1 1.5 1 3"/></svg>커피</button>
+  <button id="bChat" hidden><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 4v-4H6a2 2 0 0 1-2-2z"/><path d="M8 9h8M8 12h5"/></svg>잡담</button>
+  <button id="bWork" hidden><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M7 20h10M12 16v4M7 8h6M7 11h9"/></svg>일하는 척</button>
+  <button id="bDoze" hidden><svg viewBox="0 0 24 24"><path d="M4 6h6l-6 6h6M13 11h5l-5 5h5"/></svg>졸기</button>
+  <button id="bPaper" hidden><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M9.5 12h6M9.5 15.5h6"/></svg>서류 던지기</button>
+  <button id="bKnock" hidden><svg viewBox="0 0 24 24"><path d="M7 11V8a1.5 1.5 0 0 1 3 0v2M10 10V7a1.5 1.5 0 0 1 3 0v3M13 10V8a1.5 1.5 0 0 1 3 0v3M16 11v-1a1.5 1.5 0 0 1 3 0v4a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a1.5 1.5 0 0 1 2-1.4"/></svg>풍순이 꿀밤</button>
+  <button id="bMeet" hidden><svg viewBox="0 0 24 24"><path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17"/><path d="M4 21h16M14.5 12h.01"/></svg>회의실 호출</button>
   <button id="bOrder"><svg viewBox="0 0 24 24"><path d="M4 17h16"/><path d="M5 17a7 7 0 0 1 14 0"/><path d="M12 7V5M10 5h4"/></svg>주문</button>
 </div>
 
@@ -296,9 +318,11 @@
   <h3>어떻게 진상 부릴까요?<button class="close" id="jinClose" aria-label="닫기">×</button></h3>
   <div class="grid">
     <button data-jin="rant">난동 부리기<small>사장 나와!!</small></button>
-    <button data-jin="slap">알바생 때리기<small>풍순이 철썩</small></button>
     <button data-jin="beat">사장님 패기<small>바 넘어가서 한판</small></button>
+    <button data-jin="slap">풍순이 때리기<small>풍순이 철썩</small></button>
+    <button data-jin="slapY">예일이 때리기<small>예일이 철썩</small></button>
     <button data-jin="tease">풍순이 놀리기<small>화장 진하네요~</small></button>
+    <button data-jin="teaseY">예일이 놀리기<small>앞치마 거꾸로~</small></button>
   </div>
   <div class="hint">진상이 쌓이면 사장님이 나와서 내보내요</div>
 </div>
@@ -331,9 +355,14 @@
     <button id="tnClose" hidden>방 닫기</button>
   </div>
 </div>
+<div id="elevSheet" class="sheet pill">
+  <h3>스튜디오 풍논 · 층을 골라 주세요<button class="close" id="elevClose" aria-label="닫기">×</button></h3>
+  <div class="menuList" id="elevList"></div>
+</div>
 <div id="menuSheet" class="sheet pill">
   <h3>메뉴<button class="close" id="mainMenuClose" aria-label="닫기">×</button></h3>
   <div class="menuList">
+    <button id="menuBld">학동로 빌딩 가기</button>
     <button id="menuTennis">테니스장 가기</button>
     <button id="menuEomuk">어묵탕 떠 먹기</button>
     <button id="menuHd">희동이 부르기</button>
@@ -399,13 +428,13 @@
 
 <div id="intro">
   <div class="card">
-    <h1>풍속의 밤</h1>
-    <p>숲속 같은 주점에 오신 걸 환영해요.<br>빈자리에 앉아 다른 손님과 한 잔 해요.</p>
+    <h1>스튜디오 풍논</h1>
+    <p id="introText">학동로 빌딩 4층 사무실로 출근했어요.<br>퇴근하면 술집 '풍속의 밤'에서 한 잔 해요.</p>
     <ul>
       <li>빈 의자를 누르면 앉아요</li>
       <li>바닥을 누르면 걸어가요</li>
       <li>끌어서 돌리고, 두 손가락으로 확대해요</li>
-      <li>사장님을 너무 괴롭히면 삐져요</li>
+      <li id="introTip">☰ 메뉴에서 '풍속의 밤'으로 갈 수 있어요</li>
       <li>오른쪽 위 메뉴에서 캐릭터를 꾸밀 수 있어요</li>
     </ul>
     <div id="multiBox" hidden>

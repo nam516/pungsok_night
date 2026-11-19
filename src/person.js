@@ -7,6 +7,9 @@ const HIP_Y = 0.28;
 const SKIN = 0xffdcc8;
 
 // 공용 도형
+// 앉아서 옆자리 꿀밤 자세(knockL)
+const KNOCK = { roll: -0.3, slx: 0, slz: 3.05, st: 3.8 };
+
 const G = {
   head: new THREE.SphereGeometry(0.25, 32, 24),
   hair: new THREE.SphereGeometry(0.258, 32, 24),
@@ -488,6 +491,7 @@ function lerpTo(cur, target, k) {
 }
 
 export class Person {
+  static knockPose = KNOCK;
   // makeup, outfit 은 조풍순처럼 따로 꾸민 캐릭터에만 준다. 기본 손님은 그대로
   constructor({ hair = 0x3b2a22, style = 'bob', shirt = 0x6c8f6a, pants = 0x2f3a4a, staff = false, name = '', makeup = null, outfit = null, skirt = null, legs = null, shoes = 0x2a211d, skin: skinColor = SKIN, acc = 'none' } = {}) {
     this.name = name;
@@ -517,7 +521,7 @@ export class Person {
 
     // 관절 현재값
     // hy: 엉덩이를 좌우로 돌리는 각도(엉덩이 흔들기)
-    this.j = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: 0, elR: 0, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0 };
+    this.j = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: 0, elR: 0, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0, stL: 1 };
 
     // 따로 준 피부색은 주황 조명에 묻히지 않게 살짝 스스로 밝힌다
     const skin = skinColor === SKIN ? mat(SKIN, { roughness: 0.6 }) : mat(skinColor, { roughness: 0.6, emissive: 0x4a4242 });
@@ -609,7 +613,7 @@ export class Person {
       el.add(hand);
       const palm = new THREE.Mesh(G.hand, skin);
       hand.add(palm);
-      return { sh, tw, el, hand, palm };
+      return { sh, tw, el, hand, palm, up, fo };
     };
     this.armL = arm(1);
     this.armR = arm(-1);
@@ -913,6 +917,16 @@ export class Person {
       bow.scale.set(1.6, 1, 0.6);
       bow.position.set(0.14, 0.24, 0.05);
       this.accGroup.add(b, bow);
+    } else if (acc === 'ears') {
+      // 늘어진 강아지 귀(학동로 빌딩 대표)
+      const em = mat(0x8a5a34, { roughness: 0.9 });
+      for (const sx of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), em);
+        ear.scale.set(0.55, 1.35, 0.45);
+        ear.position.set(0.27 * sx, 0.06, -0.02);
+        ear.rotation.z = 0.35 * sx;
+        this.accGroup.add(ear);
+      }
     }
     if (acc !== 'hat') this.accGroup.rotation.x = 0;
     this.accGroup.traverse((o) => o.isMesh && (o.castShadow = true));
@@ -940,6 +954,18 @@ export class Person {
       this.plaster = g;
     }
     this.plaster.visible = on;
+  }
+
+  // 꿀밤 맞은 혹. 이마 위쪽에 볼록
+  setBump(on) {
+    if (!this.bump) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12), mat(0xf4a6a0, { roughness: 0.6 }));
+      b.position.set(0.07, 0.24, 0.13);
+      b.scale.set(1, 0.8, 1);
+      this.headShape.add(b);
+      this.bump = b;
+    }
+    this.bump.visible = on;
   }
 
   // 테니스 라켓. 오른손에 쥔다
@@ -983,7 +1009,7 @@ export class Person {
   }
 
   do(type, dur) {
-    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, swing: 0.55, slap: 0.8, hurt: 1.4, brawl: 2.6, stomp: 4.2, ladle: 1.6, sip: 1.8, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
+    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, swing: 0.55, slap: 0.8, toss: 0.9, knock: 1.1, knockL: 1.1, ouch: 1.8, punch: 4.0, oof: 4.0, coffee: 2.2, type: 4.0, doze: 5.0, hurt: 1.4, brawl: 2.6, stomp: 4.2, ladle: 1.6, sip: 1.8, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
     this.action = { type, t: 0, dur: dur || D[type] || 1.5, fired: false };
   }
 
@@ -1026,7 +1052,7 @@ export class Person {
   update(dt, obstacles, bounds) {
     this.t += dt;
     const j = this.j;
-    const tgt = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: -0.1, elR: -0.1, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0 };
+    const tgt = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: -0.1, elR: -0.1, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0, stL: 1 };
     const tipsy = this.blush;
 
     // 걷기
@@ -1112,6 +1138,18 @@ export class Person {
       tgt.lean = -0.06;
       tgt.nx = -0.15;
     }
+    // 의자에 반쯤 누운 자세. 등을 젖히고 다리를 뻗고, 한 손은 머리 뒤로 다른 손은 책상 위로
+    if (this.idlePose === 'recline' && this.state === 'sit') {
+      tgt.lean = -1.0;
+      tgt.hl = tgt.hr = -1.35;
+      tgt.kl = tgt.kr = 0.35;
+      tgt.slx = -2.6;
+      tgt.slz = 0.55;
+      tgt.elL = -2.1;
+      tgt.srx = -1.15;
+      tgt.elR = -0.35;
+      tgt.nx = 0.6;
+    }
     // 누우면 등이 바닥에 묻히지 않게 조금 띄운다
     this.knockW = (this.knockW || 0) + ((this.knocked ? 1 : 0) - (this.knockW || 0)) * (1 - Math.exp(-dt * (this.knocked ? 9 : 3)));
     if (this.state !== 'hop') this.root.position.y += (this.baseY + this.knockW * 0.14 - this.root.position.y) * (1 - Math.exp(-dt * 8));
@@ -1132,7 +1170,8 @@ export class Person {
 
     // 동작 겹치기
     const a = this.action;
-    this.glass.visible = this.state === 'sit' && !this.staff;
+    this.glass.visible = this.state === 'sit' && !this.staff && !this.officeSeat;
+    if (this.mug) this.mug.visible = false;
     this.morsel.visible = false;
     this.openHand.visible = false;
     this.armR.palm.visible = true;
@@ -1269,6 +1308,83 @@ export class Person {
         tgt.hy = mix(-0.5, 0.5, k);
         tgt.lean = 0.15;
         mood = 'happy';
+      } else if (a.type === 'punch') {
+        // 왼손은 상대 어깨를 붙잡고, 오른 주먹으로 배를 퍽퍽
+        const w = inOut(0, 0.05, 0.92, 1);
+        const r = Math.max(0, Math.sin(a.t * 13));
+        tgt.slx = mix(tgt.slx, -1.45, w);
+        tgt.slz = mix(tgt.slz, -0.15, w);
+        tgt.elL = mix(tgt.elL, -0.35, w);
+        tgt.srx = mix(tgt.srx, mix(-0.55, -1.15, r), w);
+        tgt.srz = mix(tgt.srz, 0.05, w);
+        tgt.elR = mix(tgt.elR, mix(-1.9, -0.15, r), w);
+        tgt.hy = mix(0, 0.12 + r * 0.3, w);
+        tgt.lean = mix(tgt.lean, 0.12 + r * 0.06, w);
+        mood = 'angry';
+      } else if (a.type === 'oof') {
+        // 배를 맞고 몸을 숙인다. 맞을 때마다 움찔
+        const w = inOut(0, 0.08, 0.9, 1);
+        const jolt = Math.abs(Math.sin(a.t * 7));
+        tgt.lean = mix(tgt.lean, 0.32 + jolt * 0.15, w);
+        tgt.slx = mix(tgt.slx, -0.7, w);
+        tgt.srx = mix(tgt.srx, -0.7, w);
+        tgt.elL = mix(tgt.elL, -1.6, w);
+        tgt.elR = mix(tgt.elR, -1.6, w);
+        tgt.twL = -1.0 * w;
+        tgt.twR = 1.0 * w;
+        tgt.kl = tgt.kr = mix(tgt.kl, 0.35, w);
+        tgt.hl = tgt.hr = mix(tgt.hl, -0.3, w);
+        tgt.nx = 0.2 * w;
+        mood = 'sad';
+      } else if (a.type === 'toss') {
+        // 서류 던지기. 오른팔을 머리 뒤로 젖혔다가 앞으로 휙
+        const up = inOut(0, 0.35, 0.4, 0.5);
+        const go = inOut(0.4, 0.55, 0.75, 1);
+        tgt.srx = mix(mix(tgt.srx, -2.7, up), -1.3, go);
+        tgt.elR = mix(mix(tgt.elR, -1.6, up), -0.15, go);
+        tgt.srz = mix(tgt.srz, -0.25, Math.max(up, go));
+        tgt.hy = mix(-0.25, 0.3, go) * Math.max(up, go);
+        mood = 'angry';
+      } else if (a.type === 'knock') {
+        // 꿀밤. 폴짝 뛰어 주먹을 들고 머리를 콩콩 두 번 내리친다(머리가 커서 뛰어야 닿는다)
+        const w = inOut(0, 0.2, 0.85, 1);
+        const jump = inOut(0.18, 0.32, 0.72, 0.86);
+        const tap = Math.exp(-(((p - 0.45) / 0.05) ** 2)) + Math.exp(-(((p - 0.63) / 0.05) ** 2));
+        tgt.bob += jump * 0.6 - inOut(0.05, 0.15, 0.15, 0.22) * 0.05;
+        tgt.kl = tgt.kr = mix(tgt.kl, 0.5, jump);
+        tgt.hl = tgt.hr = mix(tgt.hl, -0.3, jump);
+        tgt.srx = mix(tgt.srx, -2.2 + tap * 0.35, w);
+        tgt.srz = mix(tgt.srz, 0.5, w);
+        tgt.elR = mix(tgt.elR, -0.2 - tap * 0.9, w);
+        tgt.lean = mix(tgt.lean, 0.4, w);
+        tgt.nx = 0.12 * w;
+        mood = 'angry';
+      } else if (a.type === 'knockL') {
+        // 앉은 채로 옆자리 머리에 꿀밤. 몸을 왼쪽으로 기울이고 왼팔을 고무처럼 쭉 늘린다
+        // 팔을 먼저 들고 나서 늘린다(늘리며 휘두르면 머리를 뚫고 지나감)
+        const w = inOut(0, 0.18, 0.88, 1);
+        const ws = inOut(0.2, 0.38, 0.76, 0.9);
+        const tap = Math.exp(-(((p - 0.45) / 0.05) ** 2)) + Math.exp(-(((p - 0.63) / 0.05) ** 2));
+        tgt.roll = mix(tgt.roll, KNOCK.roll, w);
+        tgt.slx = mix(tgt.slx, KNOCK.slx, w);
+        tgt.slz = mix(tgt.slz, KNOCK.slz - tap * 0.15, w);
+        tgt.elL = mix(tgt.elL, -0.1, w);
+        tgt.stL = mix(1, KNOCK.st, ws);
+        tgt.nz = mix(tgt.nz, -KNOCK.roll * 0.5, w);
+        mood = 'angry';
+      } else if (a.type === 'ouch') {
+        // 꿀밤 맞고 두 손으로 머리를 감싸며 움츠린다
+        const w = inOut(0, 0.1, 0.8, 1);
+        tgt.slx = mix(tgt.slx, -2.7, w);
+        tgt.srx = mix(tgt.srx, -2.7, w);
+        tgt.slz = mix(tgt.slz, 0.35, w);
+        tgt.srz = mix(tgt.srz, -0.35, w);
+        tgt.elL = mix(tgt.elL, -1.7, w);
+        tgt.elR = mix(tgt.elR, -1.7, w);
+        tgt.nx = mix(tgt.nx, 0.28, w);
+        tgt.lean = mix(tgt.lean, 0.12, w);
+        tgt.roll = Math.sin(this.t * 16) * 0.05 * w;
+        mood = 'sad';
       } else if (a.type === 'slap') {
         // 손바닥으로 철썩. 팔을 들었다가 옆으로 크게 휘두른다
         const up = inOut(0, 0.3, 0.35, 0.45);
@@ -1336,6 +1452,46 @@ export class Person {
         tgt.lean = mix(tgt.lean, 0.3, w);
         tgt.nx = mix(tgt.nx, 0.25, w);
         mood = 'happy';
+      } else if (a.type === 'coffee') {
+        // 머그컵 커피 홀짝. 술잔 대신 머그컵을 든다
+        const w = inOut(0, 0.2, 0.75, 0.9);
+        if (!this.mug) {
+          this.mug = new THREE.Group();
+          const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.1, 14), mat(0xf4f1ea, { roughness: 0.5 }));
+          const handle = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.008, 6, 12), mat(0xf4f1ea, { roughness: 0.5 }));
+          handle.position.x = 0.05;
+          const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.038, 14), mat(0x3a2414));
+          coffee.rotation.x = -Math.PI / 2;
+          coffee.position.y = 0.046;
+          this.mug.add(cup, handle, coffee);
+          this.mug.position.copy(this.glass.position);
+          this.mug.rotation.copy(this.glass.rotation);
+          this.armR.hand.add(this.mug);
+        }
+        this.mug.visible = true;
+        this.glass.visible = false;
+        tgt.srx = mix(tgt.srx, -1.75, w);
+        tgt.srz = mix(tgt.srz, 0.55, w);
+        tgt.elR = mix(tgt.elR, -1.75, w);
+        tgt.nx = mix(0, -0.3, w);
+        mood = p > 0.7 ? 'happy' : 'drink';
+      } else if (a.type === 'type') {
+        // 자판 두드리기. 앉아서 두 손을 번갈아 톡톡
+        const w = inOut(0, 0.1, 0.9, 1);
+        tgt.slx = mix(tgt.slx, -1.05, w);
+        tgt.srx = mix(tgt.srx, -1.05, w);
+        tgt.elL = mix(tgt.elL, -0.9 + Math.sin(a.t * 22) * 0.18, w);
+        tgt.elR = mix(tgt.elR, -0.9 + Math.sin(a.t * 22 + 1.6) * 0.18, w);
+        tgt.lean = mix(tgt.lean, 0.18, w);
+        tgt.nx = 0.15 * w;
+        mood = 'serious';
+      } else if (a.type === 'doze') {
+        // 꾸벅꾸벅 졸기. 눈을 감고 고개가 떨어졌다 올라온다
+        const w = inOut(0, 0.1, 0.9, 1);
+        const nod = Math.sin(a.t * 2.2) * 0.5 + 0.5;
+        tgt.nx = mix(0, 0.25 + nod * 0.45, w);
+        tgt.lean = mix(tgt.lean, 0.1 + nod * 0.1, w);
+        mood = 'blink';
       } else if (a.type === 'sip') {
         // 컵을 들고 국물을 후루룩. 술은 아니라 취기는 오르지 않는다
         const w = inOut(0, 0.2, 0.75, 0.9);
@@ -1493,6 +1649,17 @@ export class Person {
     this.armL.tw.rotation.y = j.twL;
     this.armR.tw.rotation.y = j.twR;
     this.armL.el.rotation.x = j.elL;
+    // 왼팔 늘이기(꿀밤). 1 이면 원래 길이
+    const L = this.armL;
+    if (Math.abs(j.stL - 1) < 0.002) j.stL = 1;
+    if (j.stL !== 1 || L.up.scale.y !== 1) {
+      const st = j.stL;
+      L.up.scale.y = L.fo.scale.y = st;
+      L.up.position.y = -0.07 * st;
+      L.el.position.y = -0.12 * st;
+      L.fo.position.y = -0.055 * st;
+      L.hand.position.y = -0.125 * st;
+    }
     this.armR.el.rotation.x = j.elR;
     this.legL.hp.rotation.x = j.hl;
     this.legR.hp.rotation.x = j.hr;
