@@ -1137,8 +1137,9 @@ export function buildBuilding(scene) {
     Z.bounds.x0 = Z.c.x - 12.15;
     const g = Z.g;
     const W = Z.wallM;
-    // 테라스
+    // 테라스. 눌러서 걸어갈 수 있게 누르는 바닥도 깐다
     floorPlane(g, 4.4, Zf - Zb, wood, -10.2, 0);
+    pickFloor(Z, 4.4, Zf - Zb, -10.2, 0);
     const rail = new THREE.MeshStandardMaterial({ color: 0xa8c8d8, transparent: true, opacity: 0.22, roughness: 0.1, depthWrite: false });
     box(g, 0.04, 1.0, Zf - Zb, rail, -12.4, 0.5, 0);
     box(g, 4.4, 1.0, 0.04, rail, -10.2, 0.5, Zb);
@@ -1231,11 +1232,16 @@ export function buildBuilding(scene) {
     box(g, 0.1, 0.7, 0.8, legM, 2.7, 0.37, 2.75);
     box(g, 0.1, 0.7, 0.8, legM, 4.6, 0.37, 2.75);
     Z.block(2.4, 4.9, 2.15, 3.35);
+    // 회의실 의자도 앉을 수 있다(엎드려 자기). 맨 끝에 붙여서 다른 자리 번호는 그대로
+    let mi = 0;
     for (const x of [2.95, 4.35]) {
       chair(g, x, 1.85, 0);
       chair(g, x, 3.65, Math.PI);
+      addSeat(Z, x, 1.85, 0, 'meet' + mi++);
+      addSeat(Z, x, 3.65, Math.PI, 'meet' + mi++);
     }
     chair(g, 2.0, 2.75, Math.PI / 2);
+    addSeat(Z, 2.0, 2.75, Math.PI / 2, 'meet' + mi++);
     box(g, 0.06, 1.0, 1.7, monM, 5.88, 1.5, 2.75);
     plane(g, 1.6, 0.9, screens[4], 5.84, 1.5, 2.75, 0, -Math.PI / 2);
     sign(g, '회의실', 3.65, 2.35, ZcS + 0.04, 0.9);

@@ -226,5 +226,51 @@ export function gridPath(from, to, rects, bounds, cell = 0.2, pad = 0.14) {
     k = far + 1;
   }
   out.push(end);
+  return roundCorners(from, out, (p, q) => clearLine(G, toCell(p), toCell(q)));
+}
+
+// 꺾이는 점을 짧은 곡선으로 바꿔 부드럽게 돈다. 곡선이 장애물에 걸리면 반경을 줄이고, 그래도 걸리면 그대로 꺾는다
+function roundCorners(from, pts, clear) {
+  const all = [from, ...pts];
+  const out = [];
+  for (let i = 1; i < all.length; i++) {
+    const p = all[i];
+    if (i === all.length - 1) {
+      out.push(p);
+      break;
+    }
+    const a = all[i - 1];
+    const c = all[i + 1];
+    const l1 = Math.hypot(p.x - a.x, p.z - a.z);
+    const l2 = Math.hypot(c.x - p.x, c.z - p.z);
+    if (l1 < 0.05 || l2 < 0.05) {
+      out.push(p);
+      continue;
+    }
+    const u1 = { x: (p.x - a.x) / l1, z: (p.z - a.z) / l1 };
+    const u2 = { x: (c.x - p.x) / l2, z: (c.z - p.z) / l2 };
+    if (u1.x * u2.x + u1.z * u2.z > 0.97) {
+      out.push(p);
+      continue;
+    }
+    let r = Math.min(0.55, l1 * 0.45, l2 * 0.45);
+    let arc = null;
+    for (let k = 0; k < 2 && !arc; k++, r *= 0.5) {
+      const s0 = { x: p.x - u1.x * r, z: p.z - u1.z * r };
+      const e0 = { x: p.x + u2.x * r, z: p.z + u2.z * r };
+      const pts2 = [];
+      for (let n = 0; n <= 4; n++) {
+        const t = n / 4;
+        const m = (1 - t) * (1 - t);
+        const q = 2 * (1 - t) * t;
+        pts2.push({ x: m * s0.x + q * p.x + t * t * e0.x, z: m * s0.z + q * p.z + t * t * e0.z });
+      }
+      let ok = true;
+      for (let n = 0; n < 4 && ok; n++) ok = clear(pts2[n], pts2[n + 1]);
+      if (ok) arc = pts2;
+    }
+    if (arc) out.push(...arc);
+    else out.push(p);
+  }
   return out;
 }

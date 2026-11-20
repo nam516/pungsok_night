@@ -242,6 +242,15 @@ yeil.home = YEIL_HOME;
 // 예일이 담당 테이블(오른쪽 줄과 가운데 앞). 나머지는 풍순이. 모든 화면에서 같게 나뉜다
 const YEIL_TABLES = new Set([2, 4, 5]);
 const staffFor = (T) => (YEIL_TABLES.has(T.id) ? yeil : server);
+// 주문 담당은 덜 바쁜 알바생. 둘 다 한가하면 반반. 주문한 사람이 정해서 신호에 넣는다(w)
+function pickStaff(T) {
+  const load = (s) => (s.job ? 1 : 0) + s.jobs.length + (s.knocked || s.frozenUntil > simT ? 2 : 0) + ((s === server ? roam || date : yRoam) ? 0.5 : 0);
+  const a = load(server);
+  const b = load(yeil);
+  if (a !== b) return a < b ? server : yeil;
+  return Math.random() < 0.5 ? server : yeil;
+}
+const staffByKey = (w, T) => (w === 'y' ? yeil : w === 'p' ? server : staffFor(T));
 
 // 말풍선
 const labels = $('#labels');
@@ -678,6 +687,10 @@ function serverUpdate() {
     date = null;
     server.action = null;
   }
+  if (yRoam && yeil.jobs.length) {
+    yRoam = null;
+    yeil.action = null;
+  }
   serveUpdate(server);
   serveUpdate(yeil);
 }
@@ -732,12 +745,79 @@ function serveUpdate(s) {
 const YEIL_TAP = ['네~ 부르셨어요?', '주문은 아래 버튼으로 해 주세요~', '오늘 손님 진짜 많네요 하하', '풍순 언니요? 저기 있어요~'];
 const YEIL_IDLE = ['어서 오세요~', '컵 다 닦았다...', '오늘 손님 진짜 많다', '풍순 언니 또 사장님한테 가네...', '주문하실 거 있으면 불러 주세요~'];
 function yeilIdle(dt) {
-  if (!decides() || ySulk || yeil.frozenUntil > simT) return;
+  if (yeil.frozenUntil > simT) return;
+  if (yRoam) return yRoamUpdate();
+  if (!decides() || ySulk) return;
   if (yeil.job || yeil.jobs.length || yeil.state !== 'stand' || yeil.action) return;
   yeil.idleT = (yeil.idleT ?? rnd(8, 16)) - dt;
   if (yeil.idleT > 0) return;
   yeil.idleT = rnd(14, 24);
+  if (Math.random() < 0.6 && yGoRound()) return;
   staffDo(yeil, pick(['wave', 'talk', 'laugh']), pick(YEIL_IDLE), 2.2);
+}
+
+// ---------- 예일이 테이블 돌기 ----------
+// 풍순이처럼 손님 테이블을 돌며 챙긴다(여우 짓 대신 싹싹하게). 방장이 정해 roamGo/roamFlirt/roamHome 에 w:'y' 를 붙여 보낸다
+const YEIL_CHECK = ['더 필요하신 거 없으세요?', '맛있게 드세요~ ㅎㅎ', '물 더 갖다드릴까요?', '앞접시 더 드릴까요?', '저희 감자전 진짜 맛있어요!', '오늘 손님 많아서 정신없어요 ㅠㅠ'];
+const YEIL_BACK = ['감사합니다~', '괜찮아요 ㅎㅎ', '예일씨 최고!', '물 좀 더 주세요~', '친절하시네요~'];
+let yRoam = null;
+
+function yGoRound(prev) {
+  const list = W.tables.filter((T) => T !== prev && seated(T).length && !(roam && roam.T === T));
+  if (!list.length) return false;
+  const T = pick(list);
+  send('roamGo', { tid: T.id, w: 'y' });
+  yRoamTo(T);
+  return true;
+}
+
+function yRoamTo(T) {
+  if (yeil.job || yeil.jobs.length) return;
+  // 풍순이가 같은 테이블에 있으면 반대편으로
+  let side = yeil.pos.x < T.x ? -1 : 1;
+  if (roam && roam.T === T) side = roam.spot.x < T.x ? 1 : -1;
+  const spot = { x: T.x + side * 1.48, z: T.z };
+  yRoam = { T, spot, phase: 'go', visits: (yRoam ? yRoam.visits : 0) + 1 };
+  yeil.action = null;
+  yeil.chatTable = T;
+  yeil.walkTo(planPath(yeil.pos, spot, W.obstacles));
+}
+
+function yRoamHome() {
+  if (!yRoam) return;
+  yRoam.phase = 'back';
+  yeil.chatTable = null;
+  yeil.walkTo(planPath(yeil.pos, YEIL_HOME, W.obstacles));
+}
+
+function yRoamUpdate() {
+  const R = yRoam;
+  if (R.phase === 'go' && yeil.state === 'stand' && (decides() || R.pending)) {
+    const f = R.pending || { act: pick(['wave', 'talk', 'laugh']), line: pick(YEIL_CHECK) };
+    R.pending = null;
+    if (decides()) send('roamFlirt', { ...f, w: 'y' });
+    yeil.targetYaw = Math.atan2(R.T.x - yeil.pos.x, 0);
+    yeil.do(f.act);
+    say(yeil, f.line, 2.4);
+    seated(R.T)
+      .filter((q) => !q.isMe && !q.remote)
+      .slice(0, 1)
+      .forEach((q) =>
+        later(1.0, () => {
+          if (!q.action) q.do('laugh');
+          say(q, pick(YEIL_BACK), 1.8);
+        })
+      );
+    R.phase = 'chat';
+  } else if (R.phase === 'chat' && !yeil.action && decides()) {
+    if (R.visits < 2 && Math.random() < 0.4 && yGoRound(R.T)) return;
+    send('roamHome', { w: 'y' });
+    yRoamHome();
+  } else if (R.phase === 'back' && yeil.state === 'stand') {
+    yeil.targetYaw = 0;
+    yeil.chatTable = null;
+    yRoam = null;
+  }
 }
 
 // 바텐더는 가끔 손을 흔든다
@@ -1347,7 +1427,10 @@ function staffCry(p, s) {
     roam = null;
     date = null;
     pSulk = S;
-  } else ySulk = S;
+  } else {
+    yRoam = null;
+    ySulk = S;
+  }
   s.faceMood = 'sad';
   say(s, X.cry, 2.4, true);
   if (!s.job && !s.jobs.length) {
@@ -2394,8 +2477,9 @@ menuBox.querySelectorAll('[data-kind]').forEach((b) => {
       return;
     }
     const kind = b.dataset.kind;
-    send('order', { tid: me.seat.table.id, kind });
-    const ok = acceptOrder(me.seat.table, kind, me);
+    const w = keyOf(pickStaff(me.seat.table));
+    send('order', { tid: me.seat.table.id, kind, w });
+    const ok = acceptOrder(me.seat.table, kind, me, w);
     toast(ok ? `${b.dataset.name} 주문했어요` : '사장님이 오뎅 리필을 막았어요...');
     if (ok && kind !== 'refill') stats.order++;
   };
@@ -2403,10 +2487,10 @@ menuBox.querySelectorAll('[data-kind]').forEach((b) => {
 
 // 주문 받기. 내 주문이든 친구 주문이든 똑같이 서빙하고 환호한다
 // 받았으면 true. 오뎅 리필이 너무 잦으면 false
-function acceptOrder(T, kind, who) {
-  const s = staffFor(T);
+function acceptOrder(T, kind, who, w) {
+  const s = staffByKey(w, T);
   if (kind === 'refill') {
-    const ok = acceptRefill(T, who);
+    const ok = acceptRefill(T, who, s);
     if (ok) sulkyOrder(s);
     return ok;
   }
@@ -2425,7 +2509,7 @@ function acceptOrder(T, kind, who) {
 // 오뎅 리필은 공짜. 한 테이블이 3분 안에 세 번째로 시키면 사장님이 나와서 "그만 드시죠."
 const REFILL_LIMIT = 2;
 const REFILL_WINDOW = 180;
-function acceptRefill(T, who) {
+function acceptRefill(T, who, s = staffFor(T)) {
   T.refills = (T.refills || []).filter((t) => simT - t < REFILL_WINDOW);
   sound.bell();
   if (T.refills.length >= REFILL_LIMIT) {
@@ -2435,7 +2519,7 @@ function acceptRefill(T, who) {
     return false;
   }
   T.refills.push(simT);
-  staffFor(T).jobs.push({ table: T, kind: 'refill' });
+  s.jobs.push({ table: T, kind: 'refill' });
   T.bill.items.refill = (T.bill.items.refill || 0) + 1;
   if (!bossBusy()) {
     say(bartender, '오뎅 리필 들어갑니다~', 2);
@@ -3050,12 +3134,15 @@ function onNet(m) {
     return syncBoss(d.m, d.s);
   }
   if (m.t === 'staff') return staffDo(d.w === 's' ? server : d.w === 'y' ? yeil : bartender, d.a, d.l, d.d, d.h, true);
-  if (m.t === 'roamGo') return !decides() && W.tables[d.tid] && roamTo(W.tables[d.tid]);
-  if (m.t === 'roamFlirt') return !decides() && roam && (roam.pending = { act: d.act, line: d.line });
-  if (m.t === 'roamHome') return !decides() && roamHome();
+  if (m.t === 'roamGo') return !decides() && W.tables[d.tid] && (d.w === 'y' ? yRoamTo : roamTo)(W.tables[d.tid]);
+  if (m.t === 'roamFlirt') {
+    const R = d.w === 'y' ? yRoam : roam;
+    return !decides() && R && (R.pending = { act: d.act, line: d.line });
+  }
+  if (m.t === 'roamHome') return !decides() && (d.w === 'y' ? yRoamHome() : roamHome());
   if (m.t === 'boss') return !isHost() && syncBoss(d.m, d.s);
   if (m.t === 'poke') return pokeBoss(true);
-  if (m.t === 'order') return W.tables[d.tid] && acceptOrder(W.tables[d.tid], d.kind, peers.get(m.f) && peers.get(m.f).p);
+  if (m.t === 'order') return W.tables[d.tid] && acceptOrder(W.tables[d.tid], d.kind, peers.get(m.f) && peers.get(m.f).p, d.w);
   if (m.t === 'pay') return W.tables[d.tid] && peers.get(m.f) && applyPay(peers.get(m.f).p, W.tables[d.tid], d.mode, d.total | 0);
   // 나머지는 그 사람 캐릭터가 하는 일
   const r = peers.get(m.f);
@@ -3100,6 +3187,11 @@ function onNet(m) {
     if (OFFICE_ACTS.includes(d.a)) officeAct(p, d.a, d.i | 0, d.j | 0);
   } else if (m.t === 'meet') {
     startMeet(p);
+  } else if (m.t === 'nap') {
+    if (d.on) startNap(p, typeof d.s === 'string' ? BLD.seatById(d.s) : null);
+    else if (p.napping) endNap(p, d.i | 0);
+  } else if (m.t === 'shout') {
+    if (typeof d.text === 'string' && d.text.trim()) shoutEffects(p, d.text.trim().slice(0, 30), d.i | 0);
   } else if (m.t === 'knock') {
     if (p.bz === 'B4') knockEffects(p, !!d.s);
   } else if (m.t === 'paper') {
@@ -3761,6 +3853,9 @@ function pungsunHold(by, s = server) {
     if (roam) roamHome();
     roam = null;
     date = null;
+  } else if (yRoam) {
+    yRoam = null;
+    s.chatTable = null;
   }
   if (!s.job && s.state === 'walk') {
     s.path = [];
@@ -4805,6 +4900,7 @@ function bldTriggers() {
 }
 
 function bldGo(target) {
+  if (me.napping) wakeNap(me, true);
   me.walkTo(BLD.path(me.bz, me.pos, target));
   send('go', { x: +target.x.toFixed(2), z: +target.z.toFixed(2), bz: me.bz });
 }
@@ -4812,6 +4908,7 @@ function bldGo(target) {
 // ---------- 빌딩 의자에 앉기 ----------
 // 가게 자리(me.seat)는 테이블과 묶여 있어서 쓰지 않는다. 빌딩 의자는 officeSeat 로 따로 앉는다
 function officeGo(seat) {
+  if (me.napping) wakeNap(me, true);
   me.walkTo(BLD.path(me.bz, me.pos, seat));
   me.officeTarget = seat;
   send('go', { x: +seat.x.toFixed(2), z: +seat.z.toFixed(2), bz: me.bz, os: seat.id });
@@ -4829,10 +4926,12 @@ function officeSit(p, seat) {
 
 // 도착하면 앉고, 일어나서 걸으면 자리를 비운다
 function officeUpdate() {
+  const napping = !!me.napping;
   const paperBtn = $('#bPaper');
-  if (paperBtn.hidden === atYeonguri()) paperBtn.hidden = !atYeonguri();
+  const canPaper = atYeonguri() && !napping;
+  if (paperBtn.hidden === canPaper) paperBtn.hidden = !canPaper;
   const meetBtn = $('#bMeet');
-  const canMeet = me.bz === 'B4' && !meet;
+  const canMeet = me.bz === 'B4' && !meet && !napping;
   if (meetBtn.hidden === canMeet) meetBtn.hidden = !canMeet;
   // 사무실 버튼. 층 안에서만 커피·잡담, 의자에 앉아 있으면 일하는 척·졸기
   const showBtn = (id, on) => {
@@ -4840,11 +4939,17 @@ function officeUpdate() {
     if (b.hidden === on) b.hidden = !on;
   };
   const onFloor = !!me.bz && FLOORS.includes(me.bz);
-  showBtn('#bCoffee', onFloor);
-  showBtn('#bChat', onFloor);
-  showBtn('#bWork', !!me.officeSeat);
-  showBtn('#bDoze', !!me.officeSeat);
-  showBtn('#bKnock', me.bz === 'B4');
+  showBtn('#bCoffee', onFloor && !napping);
+  showBtn('#bChat', onFloor && !napping);
+  showBtn('#bWork', !!me.officeSeat && !napping);
+  showBtn('#bDoze', !!me.officeSeat && !napping);
+  showBtn('#bKnock', me.bz === 'B4' && !napping);
+  showBtn('#bNap', me.bz === 'B4');
+  const napTxt = napping ? '일어나기' : '몰래 자기';
+  if ($('#bNapTxt').textContent !== napTxt) $('#bNapTxt').textContent = napTxt;
+  const terr = onTerrace(me) && !napping;
+  showBtn('#bShout', terr);
+  if (!terr && $('#shoutSheet').classList.contains('show')) $('#shoutSheet').classList.remove('show');
   // 걷기 시작하면 앉아서 하던 동작은 멈춘다
   for (const p of people) if (p.bz && p.state === 'walk' && p.action && (p.action.type === 'type' || p.action.type === 'doze')) p.action = null;
   for (const p of people) {
@@ -4958,6 +5063,159 @@ function paperUpdate(dt) {
       scene.remove(m);
       sheets.splice(n, 1);
     }
+  }
+}
+
+// ---------- 회의실에서 몰래 자기 ----------
+// 4층 회의실 의자에 앉아 책상에 엎드려 잔다. '일어나기'를 누르면 고개를 들고, 바닥을 누르면 일어나 걸어간다
+// 회의실 의자(seatByKey meet0~4) 중 빈 곳으로 간다. 신호 nap{on,s,i}(s 는 자리 id)
+const NAP_WAKE = ['흐아암~ 잘 잤다', '헉 몇 시지?!', '아무도 못 봤겠지...?', '5분만 더...'];
+const NAP_CAUGHT = ['...어디서 코 고는 소리 나는데?', '회의실 누가 쓰고 있어?', '음? 회의실 불 켜져 있네...'];
+const meetSeats = () => [0, 1, 2, 3, 4].map((i) => BLD.zones.B4.seatByKey['meet' + i]).filter(Boolean);
+let napN = 0;
+
+$('#bNap').onclick = () => {
+  if (blocked() || me.bz !== 'B4') return;
+  if (me.napping) return wakeNap(me, true);
+  if (me.napRun) return;
+  // 이미 회의실 의자에 앉아 있으면 바로 엎드린다
+  if (me.officeSeat && meetSeats().includes(me.officeSeat)) {
+    send('nap', { on: 1, s: me.officeSeat.id });
+    return startNap(me, me.officeSeat);
+  }
+  const free = meetSeats().filter((st) => !st.occupant);
+  if (!free.length) return toast('회의실 의자가 꽉 찼어요');
+  free.sort((a, b) => Math.hypot(a.x - me.pos.x, a.z - me.pos.z) - Math.hypot(b.x - me.pos.x, b.z - me.pos.z));
+  me.napRun = { seat: free[0] };
+  officeGo(free[0]);
+  toast('회의실로 살금살금...');
+};
+
+// 의자에 앉으면 엎드린다
+function napRunUpdate() {
+  const R = me.napRun;
+  if (!R || me.state === 'walk' || me.officeTarget) return;
+  me.napRun = null;
+  if (me.officeSeat !== R.seat) return;
+  send('nap', { on: 1, s: R.seat.id });
+  startNap(me, R.seat);
+}
+
+function startNap(p, seat) {
+  if (!seat || p.bz !== seat.zone) return;
+  // 친구 화면에서 아직 걸어오는 중이면 그 자리에 바로 앉힌다
+  if (p.officeSeat !== seat) {
+    if (seat.occupant && seat.occupant !== p) return;
+    officeSit(p, seat);
+  }
+  p.action = null;
+  p.setDeskNap(true);
+  p.napping = true;
+  p.zzzT = 1.5;
+  // 한참 자면 팀장이 눈치챈다. 모든 화면에서 같은 때에
+  const n = (p.napN = ++napN);
+  const k = meetSeats().indexOf(seat);
+  later(20, () => {
+    const t = leadOf();
+    if (!p.napping || p.napN !== n || !t || (meet && meet.t === t)) return;
+    say(t, NAP_CAUGHT[Math.max(0, k) % NAP_CAUGHT.length], 2.4);
+  });
+}
+
+// mine 이면 내가 깬 것. 다른 사람에게 알린다
+function wakeNap(p, mine) {
+  if (!p.napping) return;
+  const i = mine ? (Math.random() * NAP_WAKE.length) | 0 : 0;
+  if (mine) send('nap', { on: 0, i });
+  endNap(p, i);
+}
+
+function endNap(p, i) {
+  p.napping = false;
+  p.setDeskNap(false);
+  say(p, NAP_WAKE[i % NAP_WAKE.length], 2);
+}
+
+// 자는 사람 머리 위로 Z 가 떠오른다. 일어섰으면(놓친 신호) 그냥 깨운다
+function napUpdate(dt) {
+  for (const p of people) {
+    if (!p.napping) continue;
+    if (p.state !== 'sit' || p.bz !== 'B4') {
+      p.napping = false;
+      p.setDeskNap(false);
+      continue;
+    }
+    p.zzzT -= dt;
+    if (p.zzzT > 0) continue;
+    p.zzzT = 2.4;
+    if (me.bz === 'B4') zzz(p);
+  }
+}
+
+function zzz(p) {
+  p.headWorld(heartV).project(camera);
+  if (heartV.z > 1) return;
+  const x = (heartV.x * 0.5 + 0.5) * app.clientWidth;
+  const y = (-heartV.y * 0.5 + 0.5) * app.clientHeight;
+  ['z', 'Z', 'Z'].forEach((t, i) => {
+    const el = document.createElement('span');
+    el.className = 'zzz';
+    el.textContent = t;
+    el.style.left = x + 10 + i * 9 + 'px';
+    el.style.top = y - i * 8 + 'px';
+    el.style.fontSize = 12 + i * 4 + 'px';
+    el.style.setProperty('--dx', 14 + i * 6 + 'px');
+    el.style.animationDelay = i * 0.35 + 's';
+    labels.appendChild(el);
+    setTimeout(() => el.remove(), 2800);
+  });
+}
+
+// ---------- 테라스에서 소리지르기 ----------
+// 4층 테라스에 나가면 적은 말을 그대로 크게 외친다. 같은 층 직원이 가끔 반응한다
+const TERRACE_X = -8.05;
+const onTerrace = (p) => p.bz === 'B4' && p.pos.x - BLD.zones.B4.c.x < TERRACE_X;
+const SHOUT_REACT = ['누가 소리 질러?!', '테라스에서 뭐 해요 ㅋㅋ', '속 시원하겠다~', '아 깜짝이야!', '...나도 하고 싶다'];
+let shoutAt = -99;
+
+$('#bShout').onclick = () => {
+  if (blocked() || !onTerrace(me)) return;
+  $('#shoutSheet').classList.add('show');
+  $('#shoutInput').focus();
+};
+$('#shoutClose').onclick = () => $('#shoutSheet').classList.remove('show');
+$('#shoutForm').onsubmit = (e) => {
+  e.preventDefault();
+  const text = $('#shoutInput').value.trim().slice(0, 30);
+  if (!text) return toast('외칠 말을 적어 주세요');
+  if (!onTerrace(me)) return toast('테라스에서만 소리칠 수 있어요');
+  if (simT - shoutAt < 2) return toast('목 좀 쉬었다가...');
+  shoutAt = simT;
+  $('#shoutInput').value = '';
+  $('#shoutSheet').classList.remove('show');
+  const i = (Math.random() * SHOUT_REACT.length) | 0;
+  send('shout', { text, i });
+  shoutEffects(me, text, i);
+};
+
+function shoutEffects(p, text, i) {
+  if (p.state === 'sit') return;
+  // 난간(바깥) 쪽을 보고 외친다
+  p.path = [];
+  p.state = 'stand';
+  p.targetYaw = -Math.PI / 2;
+  p.action = null;
+  p.do('shout');
+  say(p, text, 3.2, true);
+  if (me.bz === 'B4') sound.yeah();
+  // 같은 층 직원 하나가 반응
+  const ws = WORKERS.filter((w) => w.bz === 'B4' && !w.knocked);
+  if (ws.length && i % 2 === 0) {
+    const w = ws[i % ws.length];
+    later(1.8, () => {
+      if (!w.action) w.do('laugh');
+      say(w, SHOUT_REACT[i % SHOUT_REACT.length], 2);
+    });
   }
 }
 
@@ -5421,6 +5679,8 @@ function tick(dt) {
   meetUpdate();
   coffeeRunUpdate();
   knockRunUpdate();
+  napRunUpdate();
+  napUpdate(dt);
   bldTriggers();
   workerTick(dt);
   W.update(dt, t);
@@ -5522,4 +5782,4 @@ if (QS.has('bar')) {
 }
 
 // 확인용. 주소에 ?debug 를 붙였을 때만 연다
-if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => staffFor(me.seat.table).jobs.push({ table: me.seat.table, kind }), yeil, staffFor, getYSulk: () => ySulk, sorryStaff, startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, beginWoo, getWoo: () => woo, FUNG, startTease, sorryPungsun, getPSulk: () => pSulk, hdBegin, getHd: () => hd, heedong, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, doubles, getTL: () => TL, openLobby, hostStart, joinSlot, enterDoubles, getTennisMode: () => tennisMode, BLD, enterBld, leaveBld, bldMove, bldGo, openElev, rideElev, officeGo, throwPaper, callMeet, getMeet: () => meet, myOfficeAct, knockPungsun, pungsunW, WORKERS, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };
+if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => staffFor(me.seat.table).jobs.push({ table: me.seat.table, kind }), yeil, staffFor, getYSulk: () => ySulk, sorryStaff, startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, beginWoo, getWoo: () => woo, FUNG, startTease, sorryPungsun, getPSulk: () => pSulk, hdBegin, getHd: () => hd, heedong, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, doubles, getTL: () => TL, openLobby, hostStart, joinSlot, enterDoubles, getTennisMode: () => tennisMode, BLD, enterBld, leaveBld, bldMove, bldGo, openElev, rideElev, officeGo, throwPaper, callMeet, getMeet: () => meet, myOfficeAct, knockPungsun, pungsunW, WORKERS, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, getYRoam: () => yRoam, pickStaff, onTerrace, wakeNap, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };

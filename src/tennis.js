@@ -254,6 +254,7 @@ export function createTennis({ scene, court, sound, playerOpts, cpuOpts, ui, onE
     if (Math.abs(p.pos.x - x) > 0.05) {
       p.path = [{ x, z }];
       p.state = 'walk';
+      p.ease = false;
     }
     p.update(dt, null, null);
     p.yaw = p.targetYaw = face;

@@ -9,6 +9,8 @@ const SKIN = 0xffdcc8;
 // 공용 도형
 // 앉아서 옆자리 꿀밤 자세(knockL)
 const KNOCK = { roll: -0.3, slx: 0, slz: 3.05, st: 3.8 };
+// 책상에 엎드려 자기 자세. 머리가 커서 엉덩이를 들고(up) 책상 쪽으로 당겨(fwd) 팔 위에 머리를 얹는다
+const DESKNAP = { lean: 0.45, up: 0.17, fwd: 0.25, sx: -1.6, sz: 0.55, el: -2.1, nx: 0.25, ny: 0.7 };
 
 const G = {
   head: new THREE.SphereGeometry(0.25, 32, 24),
@@ -492,6 +494,7 @@ function lerpTo(cur, target, k) {
 
 export class Person {
   static knockPose = KNOCK;
+  static deskNapPose = DESKNAP;
   // makeup, outfit 은 조풍순처럼 따로 꾸민 캐릭터에만 준다. 기본 손님은 그대로
   constructor({ hair = 0x3b2a22, style = 'bob', shirt = 0x6c8f6a, pants = 0x2f3a4a, staff = false, name = '', makeup = null, outfit = null, skirt = null, legs = null, shoes = 0x2a211d, skin: skinColor = SKIN, acc = 'none' } = {}) {
     this.name = name;
@@ -521,7 +524,7 @@ export class Person {
 
     // 관절 현재값
     // hy: 엉덩이를 좌우로 돌리는 각도(엉덩이 흔들기)
-    this.j = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: 0, elR: 0, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0, stL: 1 };
+    this.j = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: 0, elR: 0, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0, stL: 1, fwd: 0 };
 
     // 따로 준 피부색은 주황 조명에 묻히지 않게 살짝 스스로 밝힌다
     const skin = skinColor === SKIN ? mat(SKIN, { roughness: 0.6 }) : mat(skinColor, { roughness: 0.6, emissive: 0x4a4242 });
@@ -939,6 +942,11 @@ export class Person {
     this.root.rotation.order = 'YXZ';
   }
 
+  // 책상에 엎드려 자기. 앉아 있는 동안만 팔을 베고 엎드린다
+  setDeskNap(on) {
+    this.deskNap = on;
+  }
+
   setPlaster(on) {
     if (!this.plaster) {
       const g = new THREE.Group();
@@ -1009,12 +1017,15 @@ export class Person {
   }
 
   do(type, dur) {
-    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, swing: 0.55, slap: 0.8, toss: 0.9, knock: 1.1, knockL: 1.1, ouch: 1.8, punch: 4.0, oof: 4.0, coffee: 2.2, type: 4.0, doze: 5.0, hurt: 1.4, brawl: 2.6, stomp: 4.2, ladle: 1.6, sip: 1.8, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
+    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, swing: 0.55, slap: 0.8, toss: 0.9, shout: 2.6, knock: 1.1, knockL: 1.1, ouch: 1.8, punch: 4.0, oof: 4.0, coffee: 2.2, type: 4.0, doze: 5.0, hurt: 1.4, brawl: 2.6, stomp: 4.2, ladle: 1.6, sip: 1.8, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
     this.action = { type, t: 0, dur: dur || D[type] || 1.5, fired: false };
   }
 
   walkTo(points) {
     this.path = points.slice();
+    // 서 있다가 출발하면 천천히 시작한다. 걷던 중에 길만 바뀌면 속도 유지
+    if (this.state !== 'walk') this.walkV = this.speed * 0.35;
+    this.ease = true;
     if (this.state === 'sit') this.standUp();
     this.state = this.path.length ? 'walk' : 'stand';
   }
@@ -1052,31 +1063,43 @@ export class Person {
   update(dt, obstacles, bounds) {
     this.t += dt;
     const j = this.j;
-    const tgt = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: -0.1, elR: -0.1, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0, stL: 1 };
+    const tgt = { lean: 0, roll: 0, nx: 0, ny: 0, nz: 0, slx: 0, slz: 0.15, srx: 0, srz: -0.15, twL: 0, twR: 0, elL: -0.1, elR: -0.1, hl: 0, hr: 0, kl: 0, kr: 0, bob: 0, hy: 0, stL: 1, fwd: 0 };
     const tipsy = this.blush;
 
     // 걷기
     if (this.state === 'walk') {
-      const p = this.path[0];
-      const dx = p.x - this.root.position.x;
-      const dz = p.z - this.root.position.z;
-      const d = Math.hypot(dx, dz);
-      // 많이 취하면 걸음이 느려진다
-      const step = this.speed * dt * (tipsy >= 3 ? 0.75 : 1);
-      if (d <= step) {
-        this.root.position.x = p.x;
-        this.root.position.z = p.z;
-        this.path.shift();
-        if (!this.path.length) {
-          this.state = 'stand';
-          if (p.seat && !p.seat.occupant) this.sitAt(p.seat);
-          if (p.yaw !== undefined) this.targetYaw = p.yaw;
-          if (this.onArrive) this.onArrive(p);
+      // 출발할 때 살짝 가속, 마지막 점 앞에서 감속. 꺾이는 점에서 남은 거리는 다음 구간으로 넘겨 속도가 끊기지 않게
+      // walkTo 로 걸을 때만(테니스처럼 매 프레임 길을 다시 주는 곳은 늘 같은 속도)
+      const full = this.speed * (tipsy >= 3 ? 0.75 : 1);
+      this.walkV = this.ease ? Math.min(full, (this.walkV ?? full) + full * dt * 6) : full;
+      const last = this.path[this.path.length - 1];
+      if (this.ease && this.path.length === 1) {
+        const left = Math.hypot(last.x - this.root.position.x, last.z - this.root.position.z);
+        this.walkV = Math.min(this.walkV, full * Math.max(0.45, left / 0.4));
+      }
+      let step = this.walkV * dt;
+      while (step > 0 && this.state === 'walk') {
+        const p = this.path[0];
+        const dx = p.x - this.root.position.x;
+        const dz = p.z - this.root.position.z;
+        const d = Math.hypot(dx, dz);
+        if (d <= step) {
+          this.root.position.x = p.x;
+          this.root.position.z = p.z;
+          this.path.shift();
+          step -= d;
+          if (!this.path.length) {
+            this.state = 'stand';
+            if (p.seat && !p.seat.occupant) this.sitAt(p.seat);
+            if (p.yaw !== undefined) this.targetYaw = p.yaw;
+            if (this.onArrive) this.onArrive(p);
+          }
+          continue;
         }
-      } else {
         this.root.position.x += (dx / d) * step;
         this.root.position.z += (dz / d) * step;
         this.targetYaw = Math.atan2(dx, dz);
+        step = 0;
         // 취하면 옆으로 왔다 갔다 하며 걷는다. 평균은 0이라 길에서 벗어나지 않는다
         if (tipsy >= 2) {
           const side = Math.sin(this.t * 3.2) * 0.9 * (tipsy - 1) * dt;
@@ -1091,7 +1114,7 @@ export class Person {
         this.root.position.z = THREE.MathUtils.clamp(this.root.position.z, bounds.z0, bounds.z1);
       }
       // 뛸 때는 다리도 빨라진다. 서빙 직원 속도(2.2)까지는 기존과 같다
-      this.walkPhase += dt * 9 * Math.max(1, this.speed / 2.2);
+      this.walkPhase += dt * 9 * Math.max(1, this.speed / 2.2) * Math.max(0.55, Math.min(1, this.walkV / (this.speed || 1)));
       const s = Math.sin(this.walkPhase);
       tgt.hl = s * 0.6;
       tgt.hr = -s * 0.6;
@@ -1359,6 +1382,20 @@ export class Person {
         tgt.lean = mix(tgt.lean, 0.4, w);
         tgt.nx = 0.12 * w;
         mood = 'angry';
+      } else if (a.type === 'shout') {
+        // 소리지르기. 두 손을 입에 모으고 몸을 뒤로 젖혔다가 앞으로 내지른다
+        const w = inOut(0, 0.12, 0.88, 1);
+        const push = inOut(0.15, 0.3, 0.75, 0.9);
+        tgt.slx = mix(tgt.slx, -1.9, w);
+        tgt.srx = mix(tgt.srx, -1.9, w);
+        tgt.slz = mix(tgt.slz, -0.45, w);
+        tgt.srz = mix(tgt.srz, 0.45, w);
+        tgt.elL = mix(tgt.elL, -1.9, w);
+        tgt.elR = mix(tgt.elR, -1.9, w);
+        tgt.lean = mix(tgt.lean, mix(-0.15, 0.12, push), w);
+        tgt.nx = mix(tgt.nx, mix(-0.3, -0.12, push), w);
+        tgt.bob += Math.abs(Math.sin(this.t * 20)) * 0.01 * push;
+        mood = 'talk';
       } else if (a.type === 'knockL') {
         // 앉은 채로 옆자리 머리에 꿀밤. 몸을 왼쪽으로 기울이고 왼팔을 고무처럼 쭉 늘린다
         // 팔을 먼저 들고 나서 늘린다(늘리며 휘두르면 머리를 뚫고 지나감)
@@ -1635,11 +1672,28 @@ export class Person {
       }
     }
 
+    // 책상에 엎드려 잘 때. 팔을 포개 베고 고개는 옆으로, 천천히 숨 쉰다
+    if (this.deskNap && this.state === 'sit') {
+      tgt.lean = DESKNAP.lean + Math.sin(this.t * 1.4) * 0.02;
+      tgt.bob = DESKNAP.up;
+      tgt.fwd = DESKNAP.fwd;
+      tgt.slx = tgt.srx = DESKNAP.sx;
+      tgt.slz = -DESKNAP.sz;
+      tgt.srz = DESKNAP.sz;
+      tgt.elL = tgt.elR = DESKNAP.el;
+      tgt.nx = DESKNAP.nx;
+      tgt.ny = DESKNAP.ny;
+      tgt.nz = 0;
+      tgt.roll = 0;
+      mood = 'blink';
+    }
+
     // 관절 따라가기
     const k = 1 - Math.exp(-dt * 12);
     for (const key in tgt) j[key] = lerpTo(j[key], tgt[key], k);
 
     this.hips.position.y = HIP_Y + j.bob;
+    this.hips.position.z = j.fwd;
     this.hips.rotation.y = j.hy;
     // 엉덩이만 돌고 윗몸은 앞을 보도록 반대로 돌린다
     this.torso.rotation.set(j.lean, -j.hy * 0.8, j.roll);
@@ -1669,7 +1723,9 @@ export class Person {
     // 몸 방향
     let dy = this.targetYaw - this.yaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    this.yaw += dy * (1 - Math.exp(-dt * 10));
+    // 너무 휙 돌지 않게 초당 12라디안까지만
+    const turn = dy * (1 - Math.exp(-dt * 10));
+    this.yaw += Math.max(-dt * 12, Math.min(dt * 12, turn));
     this.root.rotation.y = this.yaw;
     if (this.knockW > 0.001) this.root.rotation.x = -1.45 * this.knockW;
     else if (this.root.rotation.x) this.root.rotation.x = 0;

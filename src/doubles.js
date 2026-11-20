@@ -393,6 +393,7 @@ export function createDoubles({ scene, court, sound, ui, send }) {
       if (Math.abs(p.pos.x - x) > 0.05) {
         p.path = [{ x, z: HOME[i].z }];
         p.state = 'walk';
+        p.ease = false;
       }
       p.update(dt, null, null);
       const face = team(i) === 0 ? Math.PI : 0;
