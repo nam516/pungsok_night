@@ -9,6 +9,8 @@ import { gridPath } from './path.js';
 
 const BX = -140;
 const FLOOR_GAP = 60;
+// 층(지하 1층~4층) 바닥을 옆으로 넓히는 배율. 평면도 0.85배로 만든 걸 넓혀 여유 있게(높이는 그대로)
+const FLOOR_S = 1.2;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export const ZONE_NAMES = {
@@ -57,7 +59,7 @@ function canvasTex(w, h, draw) {
 
 // 글자 판. lines 는 [글자, 크기, 색] 목록
 function textTex(w, h, bg, lines, border) {
-  return canvasTex(w, h, (g) => {
+  return textMark(canvasTex(w, h, (g) => {
     g.fillStyle = bg;
     g.fillRect(0, 0, w, h);
     if (border) {
@@ -79,7 +81,13 @@ function textTex(w, h, bg, lines, border) {
       g.fillText(text, w / 2, y);
       y += size * 0.625;
     }
-  });
+  }));
+}
+
+// 글자가 든 텍스처. 층을 옆으로 넓혀도 글자는 늘어나지 않게 표시해 둔다
+function textMark(t) {
+  t.userData.text = true;
+  return t;
 }
 
 // 밤 도시 창밖 풍경
@@ -240,7 +248,7 @@ function hairlineTex() {
 
 // 층 안내판. 엘리베이터 사진처럼 검은 판에 큰 층 번호와 부서 목록
 function directoryTex() {
-  return canvasTex(360, 560, (g, w, h) => {
+  return textMark(canvasTex(360, 560, (g, w, h) => {
     g.fillStyle = '#1e1f23';
     g.fillRect(0, 0, w, h);
     g.fillStyle = '#ffffff';
@@ -264,12 +272,12 @@ function directoryTex() {
       lines.forEach((t, i) => g.fillText(t, 120, y + 22 + i * 17 + (rowH - lines.length * 17 - 14) / 2));
       y += rowH;
     }
-  });
+  }));
 }
 
 // 조직도. 사용자가 준 4층 사람들
 function orgTex() {
-  return canvasTex(300, 260, (g, w, h) => {
+  return textMark(canvasTex(300, 260, (g, w, h) => {
     g.fillStyle = '#fbfaf6';
     g.fillRect(0, 0, w, h);
     g.strokeStyle = '#2a2a2e';
@@ -279,7 +287,7 @@ function orgTex() {
     g.textAlign = 'center';
     g.font = '700 26px "Gowun Dodum", sans-serif';
     g.fillText('조직도', w / 2, 46);
-    const rows = [['대표', '강아지 장'], ['상무', '희동'], ['팀장', '연구리'], ['사원', '풍순'], ['고문', '주피'], ['인턴', '풍준 / 풍열']];
+    const rows = [['대표', '강아지 장'], ['상무', '희동'], ['팀장', '풍뎅이'], ['사원', '연구리 / 풍순'], ['고문', '주피'], ['인턴', '풍준 / 풍열']];
     rows.forEach(([a, b], i) => {
       const y = 64 + i * 30;
       g.strokeRect(30, y, 90, 30);
@@ -288,7 +296,7 @@ function orgTex() {
       g.fillText(a, 75, y + 21);
       g.fillText(b, 195, y + 21);
     });
-  });
+  }));
 }
 
 // 바닥 결. 데크, 주차장, 화강석
@@ -330,14 +338,17 @@ export function buildBuilding(scene) {
   const screens = [0, 1, 2, 3, 4, 5].map((k) => new THREE.MeshBasicMaterial({ map: screenTex(k), color: k >= 4 ? 0x8a8a8a : 0xffffff }));
 
   // 구역 하나. 지역 좌표로 만들고 바깥 좌표로 바꿔 둔다
-  function zone(code, cx, cz, bounds) {
+  // S 는 바닥을 옆으로 넓히는 배율(x, z 만. 높이는 그대로). 지역 좌표 × S 가 바깥 좌표의 거리
+  function zone(code, cx, cz, bounds, S = 1) {
     const g = new THREE.Group();
     g.position.set(cx, 0, cz);
+    g.scale.set(S, 1, S);
     const Z = {
       code,
       name: ZONE_NAMES[code],
       c: new THREE.Vector3(cx, 0, cz),
-      bounds: { x0: cx + bounds[0], x1: cx + bounds[1], z0: cz + bounds[2], z1: cz + bounds[3] },
+      S,
+      bounds: { x0: cx + bounds[0] * S, x1: cx + bounds[1] * S, z0: cz + bounds[2] * S, z1: cz + bounds[3] * S },
       obstacles: [],
       triggers: [],
       spawn: {},
@@ -348,13 +359,13 @@ export function buildBuilding(scene) {
       lights: [],
       g,
     };
-    Z.block = (x0, x1, z0, z1) => Z.obstacles.push({ x0: cx + x0, x1: cx + x1, z0: cz + z0, z1: cz + z1 });
+    Z.block = (x0, x1, z0, z1) => Z.obstacles.push({ x0: cx + x0 * S, x1: cx + x1 * S, z0: cz + z0 * S, z1: cz + z1 * S });
     // kind: go(다른 구역 to 의 key 자리로), shop(가게로), elev(엘리베이터 타기)
-    Z.trigger = (kind, x0, x1, z0, z1, to, key) => Z.triggers.push({ id: code + kind + Z.triggers.length, kind, to, key, x0: cx + x0, x1: cx + x1, z0: cz + z0, z1: cz + z1 });
-    Z.at = (key, x, z, yaw = 0) => (Z.spawn[key] = { x: cx + x, z: cz + z, yaw });
+    Z.trigger = (kind, x0, x1, z0, z1, to, key) => Z.triggers.push({ id: code + kind + Z.triggers.length, kind, to, key, x0: cx + x0 * S, x1: cx + x1 * S, z0: cz + z0 * S, z1: cz + z1 * S });
+    Z.at = (key, x, z, yaw = 0) => (Z.spawn[key] = { x: cx + x * S, z: cz + z * S, yaw });
     // 일하는 사람 자리. sit 이면 의자에 앉는다
-    Z.spot = (key, x, z, yaw = 0, sit = true) => (Z.spots[key] = { x: cx + x, z: cz + z, yaw, sit });
-    Z.light = (x, y, z, color, intensity, dist) => Z.lights.push({ pos: new THREE.Vector3(cx + x, y, cz + z), color, intensity, dist });
+    Z.spot = (key, x, z, yaw = 0, sit = true) => (Z.spots[key] = { x: cx + x * S, z: cz + z * S, yaw, sit });
+    Z.light = (x, y, z, color, intensity, dist) => Z.lights.push({ pos: new THREE.Vector3(cx + x * S, y, cz + z * S), color, intensity, dist: dist * S });
     zones[code] = Z;
     return Z;
   }
@@ -377,6 +388,8 @@ export function buildBuilding(scene) {
     const o = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
     o.position.set(x, y, z);
     o.rotation.set(rx, ry, 0);
+    // 넓힌 층에서도 글자판은 원래 비율로
+    if (m.map && m.map.userData.text && g.scale.x !== 1) o.scale.x = 1 / g.scale.x;
     g.add(o);
     return o;
   };
@@ -392,16 +405,16 @@ export function buildBuilding(scene) {
   };
   // 누르면 그 자리로 걸어가는 바닥. 합치지 않고 따로 둔다
   const pickFloor = (Z, w, d, x, z) => {
-    const o = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ visible: false }));
+    const o = new THREE.Mesh(new THREE.PlaneGeometry(w * Z.S, d * Z.S), new THREE.MeshBasicMaterial({ visible: false }));
     o.rotation.x = -Math.PI / 2;
-    o.position.set(Z.c.x + x, 0.002, Z.c.z + z);
+    o.position.set(Z.c.x + x * Z.S, 0.002, Z.c.z + z * Z.S);
     o.userData.bfloor = Z.code;
     scene.add(o);
     picks.push(o);
   };
   const pickBox = (Z, w, h, d, x, y, z, data) => {
-    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ visible: false }));
-    o.position.set(Z.c.x + x, y, Z.c.z + z);
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w * Z.S, h, d * Z.S), new THREE.MeshBasicMaterial({ visible: false }));
+    o.position.set(Z.c.x + x * Z.S, y, Z.c.z + z * Z.S);
     Object.assign(o.userData, data);
     scene.add(o);
     picks.push(o);
@@ -409,7 +422,7 @@ export function buildBuilding(scene) {
 
   // 앉을 수 있는 자리 하나. 의자 자리에 누르는 상자를 둔다
   const addSeat = (Z, x, z, yaw, key) => {
-    const seat = { id: Z.code + ':' + Z.seats.length, zone: Z.code, x: Z.c.x + x, z: Z.c.z + z, yaw, occupant: null };
+    const seat = { id: Z.code + ':' + Z.seats.length, zone: Z.code, x: Z.c.x + x * Z.S, z: Z.c.z + z * Z.S, yaw, occupant: null };
     Z.seats.push(seat);
     if (key) Z.seatByKey[key] = seat;
     pickBox(Z, 0.7, 1.1, 0.7, x, 0.55, z, { oseat: seat });
@@ -645,7 +658,7 @@ export function buildBuilding(scene) {
   const Xe = 8.0;
   function floorBase(code, o) {
     const west = o.west;
-    const Z = zone(code, BX, -FLOOR_GAP * SLOT[code], [west + 0.25, Xe - 0.25, Zb + 0.25, Zf - 0.25]);
+    const Z = zone(code, BX, -FLOOR_GAP * SLOT[code], [west + 0.25, Xe - 0.25, Zb + 0.25, Zf - 0.25], FLOOR_S);
     const g = Z.g;
     const wallM = std(o.wall, { roughness: 0.85 });
     Z.wallM = wallM;
@@ -927,7 +940,7 @@ export function buildBuilding(scene) {
     {
       const len = 4.2;
       const beam = new THREE.Mesh(new THREE.ConeGeometry(1.3, len, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.05, depthWrite: false, blending: THREE.AdditiveBlending }));
-      beam.position.set(Z.c.x - 8.8, 2.0, Z.c.z + ZcN - 0.5 - len / 2);
+      beam.position.set(Z.c.x - 8.8 * Z.S, 2.0, Z.c.z + (ZcN - 0.5 - len / 2) * Z.S);
       beam.rotation.x = -Math.PI / 2;
       scene.add(beam);
     }
@@ -1095,7 +1108,7 @@ export function buildBuilding(scene) {
     for (const x of [-1.35, -0.5]) box(g, 0.7, 2.1, 0.9, std(0x15161a), x, 1.05, -4.5);
     for (let i = 0; i < 32; i++) {
       const led = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), anim.ledA);
-      led.position.set(Z.c.x + (i < 16 ? -1.35 : -0.5) + ((i % 2) - 0.5) * 0.3, 0.3 + ((i % 16) >> 1) * 0.22, Z.c.z - 4.04);
+      led.position.set(Z.c.x + ((i < 16 ? -1.35 : -0.5) + ((i % 2) - 0.5) * 0.3) * Z.S, 0.3 + ((i % 16) >> 1) * 0.22, Z.c.z - 4.04 * Z.S);
       scene.add(led);
       anim.leds.push(led);
     }
@@ -1129,7 +1142,7 @@ export function buildBuilding(scene) {
     // 처음 시작하는 자리. 복도 가운데
     Z.at('start', -3.4, -0.22, 0);
     // 테라스까지 갈 수 있게 왼쪽 경계를 넓힌다
-    Z.bounds.x0 = Z.c.x - 12.15;
+    Z.bounds.x0 = Z.c.x - 12.15 * Z.S;
     const g = Z.g;
     const W = Z.wallM;
     // 테라스. 눌러서 걸어갈 수 있게 누르는 바닥도 깐다

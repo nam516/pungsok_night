@@ -8,7 +8,7 @@ const SKIN = 0xffdcc8;
 
 // 공용 도형
 // 앉아서 옆자리 꿀밤 자세(knockL)
-const KNOCK = { roll: -0.3, slx: 0, slz: 3.05, st: 3.8 };
+const KNOCK = { roll: -0.3, slx: 0, slz: 2.85, st: 5.1 };
 // 책상에 엎드려 자기 자세. 머리가 커서 엉덩이를 들고(up) 책상 쪽으로 당겨(fwd) 팔 위에 머리를 얹는다
 const DESKNAP = { lean: 0.45, up: 0.17, fwd: 0.25, sx: -1.6, sz: 0.55, el: -2.1, nx: 0.25, ny: 0.7 };
 

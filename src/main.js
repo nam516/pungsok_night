@@ -41,7 +41,9 @@ const CAM_OFFSET = new THREE.Vector3(0, 8.8, 12.8);
 const CAM_STREET = new THREE.Vector3(0, 16.8, 36.3);
 // 엘리베이터 안은 가까이서
 const CAM_CABIN = new THREE.Vector3(0, 3.0, 6.0);
-const camDefault = () => (me && me.bz === 'B0' ? CAM_STREET : me && me.bz === 'EV' ? CAM_CABIN : CAM_OFFSET);
+// 빌딩 층 안은 가게보다 가까이(같은 각도)
+const CAM_ROOM = new THREE.Vector3(0, 6.3, 9.2);
+const camDefault = () => (me && me.bz === 'B0' ? CAM_STREET : me && me.bz === 'EV' ? CAM_CABIN : me && me.bz ? CAM_ROOM : CAM_OFFSET);
 const camAimY = () => (me && me.bz === 'B0' ? 2.2 : me && me.bz === 'EV' ? 0.6 : 0.5);
 // 넓은 화면의 거리에서는 건물 쪽으로 조금 당겨 본다
 const camAimX = () => (me.bz === 'B0' && !NARROW() ? BLD.zones.B0.c.x + (me.pos.x - BLD.zones.B0.c.x) * 0.4 : me.pos.x);
@@ -4804,6 +4806,8 @@ function updateBldHud() {
 // 순간이동한 뒤 카메라를 바로 옮긴다(먼 거리를 스르륵 따라가지 않게)
 function snapCam() {
   controls.maxDistance = me.bz === 'B0' ? 42 : 22;
+  // 빌딩 층 안에서는 더 가까이 당겨 볼 수 있게
+  controls.minDistance = me.bz && me.bz !== 'B0' ? 4 : 6;
   controls.target.set(camAimX(), camAimY(), me.pos.z);
   lastTarget.copy(controls.target);
   camera.position.copy(controls.target).add(camDefault());
@@ -5483,7 +5487,7 @@ function bingoUpdate() {
 // ---------- 테라스에서 소리지르기 ----------
 // 4층 테라스에 나가면 적은 말을 그대로 크게 외친다. 같은 층 직원이 가끔 반응한다
 const TERRACE_X = -8.05;
-const onTerrace = (p) => p.bz === 'B4' && p.pos.x - BLD.zones.B4.c.x < TERRACE_X;
+const onTerrace = (p) => p.bz === 'B4' && p.pos.x - BLD.zones.B4.c.x < TERRACE_X * BLD.zones.B4.S;
 const SHOUT_REACT = ['누가 소리 질러?!', '테라스에서 뭐 해요 ㅋㅋ', '속 시원하겠다~', '아 깜짝이야!', '...나도 하고 싶다'];
 let shoutAt = -99;
 
@@ -5693,7 +5697,7 @@ function myOfficeAct(a) {
   if (a === 'coffee' && !me.officeSeat) {
     if (!hasPantry(me.bz)) return toast('이 층엔 탕비실이 없어요');
     const Z = BLD.zones[me.bz];
-    const spot = { x: Z.c.x + PANTRY.x, z: Z.c.z + PANTRY.z };
+    const spot = { x: Z.c.x + PANTRY.x * Z.S, z: Z.c.z + PANTRY.z * Z.S };
     bldGo(spot);
     me.coffeeRun = { i, spot };
     return;
@@ -5727,7 +5731,8 @@ const MEET_OOF = ['끄억!', '윽!', '컥!!', '으억...', '자, 잠깐...!', '�
 const MEET_PUNCH = ['왤케 일을 안 해!!', '말투가 재수가 없어!!', '미친새끼야!!', '이건 야근 몫!'];
 const MEET_SEC = 4;
 let meet = null;
-const b4 = (pt) => ({ x: BLD.zones.B4.c.x + pt.x, z: BLD.zones.B4.c.z + pt.z });
+// 4층 지역 좌표 → 바깥 좌표(층을 넓힌 배율 S 반영)
+const b4 = (pt) => ({ x: BLD.zones.B4.c.x + pt.x * BLD.zones.B4.S, z: BLD.zones.B4.c.z + pt.z * BLD.zones.B4.S });
 
 function callMeet() {
   if (me.bz !== 'B4') return;
