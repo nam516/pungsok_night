@@ -976,6 +976,23 @@ export class Person {
     this.bump.visible = on;
   }
 
+  // 담배. 오른손에 든다(담배 타임)
+  holdCig(on) {
+    if (!this.cig) {
+      const g = new THREE.Group();
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.09, 8), mat(0xf6f2ea, { roughness: 0.8 }));
+      stick.rotation.z = Math.PI / 2;
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.013, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff7a2a }));
+      tip.position.x = 0.05;
+      g.add(stick, tip);
+      g.position.copy(this.glass.position);
+      g.position.y += 0.03;
+      this.armR.hand.add(g);
+      this.cig = g;
+    }
+    this.cigOn = on;
+  }
+
   // 테니스 라켓. 오른손에 쥔다
   holdRacket() {
     const g = new THREE.Group();
@@ -1017,7 +1034,7 @@ export class Person {
   }
 
   do(type, dur) {
-    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, swing: 0.55, slap: 0.8, toss: 0.9, shout: 2.6, knock: 1.1, knockL: 1.1, ouch: 1.8, punch: 4.0, oof: 4.0, coffee: 2.2, type: 4.0, doze: 5.0, hurt: 1.4, brawl: 2.6, stomp: 4.2, ladle: 1.6, sip: 1.8, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
+    const D = { cheers: 1.7, oneshot: 2.3, anju: 2.0, talk: 2.4, wave: 1.5, laugh: 1.3, serve: 1.0, yeah: 3.6, tantrum: 2.4, stop: 2.4, humph: 1.3, warn: 2.2, rage: 1.4, clap: 0.7, puke: 2.6, swing: 0.55, slap: 0.8, toss: 0.9, shout: 2.6, smoke: 2.2, squat: 6.0, knock: 1.1, knockL: 1.1, ouch: 1.8, punch: 4.0, oof: 4.0, coffee: 2.2, type: 4.0, doze: 5.0, hurt: 1.4, brawl: 2.6, stomp: 4.2, ladle: 1.6, sip: 1.8, wink: 1.9, aegyo: 2.2, hairflip: 1.7 };
     this.action = { type, t: 0, dur: dur || D[type] || 1.5, fired: false };
   }
 
@@ -1195,6 +1212,7 @@ export class Person {
     const a = this.action;
     this.glass.visible = this.state === 'sit' && !this.staff && !this.officeSeat;
     if (this.mug) this.mug.visible = false;
+    if (this.cig) this.cig.visible = !!this.cigOn;
     this.morsel.visible = false;
     this.openHand.visible = false;
     this.armR.palm.visible = true;
@@ -1382,6 +1400,27 @@ export class Person {
         tgt.lean = mix(tgt.lean, 0.4, w);
         tgt.nx = 0.12 * w;
         mood = 'angry';
+      } else if (a.type === 'smoke') {
+        // 담배 한 모금. 손을 입으로 가져갔다가 내리고 후~
+        const w = inOut(0, 0.25, 0.55, 0.8);
+        tgt.srx = mix(tgt.srx, -1.75, w);
+        tgt.srz = mix(tgt.srz, 0.5, w);
+        tgt.elR = mix(tgt.elR, -1.9, w);
+        tgt.nx = mix(tgt.nx, p > 0.55 ? -0.25 : -0.05, Math.max(w, inOut(0.55, 0.65, 0.85, 1)));
+        mood = p > 0.55 ? 'blink' : 'drink';
+      } else if (a.type === 'squat') {
+        // 얼차려. 두 팔을 앞으로 뻗고 앉았다 일어서기를 0.7초마다
+        const w = inOut(0, 0.05, 0.95, 1);
+        const down = Math.sin(((a.t / 0.7) % 1) * Math.PI);
+        tgt.hl = tgt.hr = -1.2 * down * w;
+        tgt.kl = tgt.kr = 2.0 * down * w;
+        tgt.bob = -0.11 * down * w;
+        tgt.lean = 0.3 * down * w;
+        tgt.slx = tgt.srx = mix(tgt.slx, -1.5, w);
+        tgt.slz = 0.1;
+        tgt.srz = -0.1;
+        tgt.elL = tgt.elR = -0.05;
+        mood = 'sad';
       } else if (a.type === 'shout') {
         // 소리지르기. 두 손을 입에 모으고 몸을 뒤로 젖혔다가 앞으로 내지른다
         const w = inOut(0, 0.12, 0.88, 1);

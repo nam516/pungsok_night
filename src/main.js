@@ -3190,6 +3190,14 @@ function onNet(m) {
   } else if (m.t === 'nap') {
     if (d.on) startNap(p, typeof d.s === 'string' ? BLD.seatById(d.s) : null);
     else if (p.napping) endNap(p, d.i | 0);
+  } else if (m.t === 'bg') {
+    onBingoNet(d, m.f);
+  } else if (m.t === 'cig') {
+    if (d.on) startCig(p);
+    else stopCig(p);
+  } else if (m.t === 'hdev') {
+    const H = typeof d.x === 'number' && typeof d.z === 'number' ? { x: d.x, z: d.z } : null;
+    if (d.k === 'smoke' || d.k === 'drill') startHdEv(p, d.k, H);
   } else if (m.t === 'shout') {
     if (typeof d.text === 'string' && d.text.trim()) shoutEffects(p, d.text.trim().slice(0, 30), d.i | 0);
   } else if (m.t === 'knock') {
@@ -4705,7 +4713,7 @@ let elevFrom = 'B1';
 
 // 층마다 일하는 사람들. 내가 그 층에 있을 때만 수다를 떤다
 // 4층은 사용자가 준 조직도 사람들. 재무팀에 팀장 풍뎅이(반쯤 누워 일함)와 사원 풍순
-// 사원 연구리, 고문 주피, 인턴 풍준·풍열(경영지원팀)은 자리 이름표만 있고 누구나 앉을 수 있다
+// 사원 연구리, 고문 주피(재무팀 섬 머리), 인턴 풍준·풍열(경영지원팀)은 자리 이름표만 있고 누구나 앉을 수 있다
 const WORKER_DEFS = [
   { bz: 'B4', name: '대표 강아지 장', spot: 'ceo', look: { style: 'short', hair: 0x6a4228, shirt: 0x1f2a44, pants: 0x1f2128, acc: 'ears' }, lines: ['다들 오늘 회식 어때요?', '멍! ...아니 방금 건 기침이에요', '이번 분기 숫자 가져와 봐요', '오늘은 법카로 풍속의 밤 간다!'] },
   { bz: 'B4', name: '팀장 풍뎅이', spot: 'lead', pose: 'recline', look: { style: 'short', hair: 0x1c1512, shirt: 0xf1ede4, pants: 0x2a2a2a, outfit: 'cabaret' }, lines: ['아~ 결재는 내일 하자~', '이 정도면 오늘 일 많이 했다...', '누가 커피 좀 타 줄 사람~', '퇴근까지 몇 시간 남았냐...'] },
@@ -4922,13 +4930,14 @@ function officeSit(p, seat) {
   p.officeSeat = seat;
   seat.occupant = p;
   if (p === me && seat === BLD.zones.B4.seatByKey.yeonguri) toast('팀장님께 서류를 던지거나 옆자리 풍순이한테 꿀밤을 줄 수 있어요');
+  if (p === me && seat === BLD.zones.B4.seatByKey.jupi) toast('고문 자리예요. 팀장님께 서류를 던지거나 풍순이한테 꿀밤을 줄 수 있어요');
 }
 
 // 도착하면 앉고, 일어나서 걸으면 자리를 비운다
 function officeUpdate() {
   const napping = !!me.napping;
   const paperBtn = $('#bPaper');
-  const canPaper = atYeonguri() && !napping;
+  const canPaper = !!paperSeat() && !napping;
   if (paperBtn.hidden === canPaper) paperBtn.hidden = !canPaper;
   const meetBtn = $('#bMeet');
   const canMeet = me.bz === 'B4' && !meet && !napping;
@@ -4945,10 +4954,15 @@ function officeUpdate() {
   showBtn('#bDoze', !!me.officeSeat && !napping);
   showBtn('#bKnock', me.bz === 'B4' && !napping);
   showBtn('#bNap', me.bz === 'B4');
+  showBtn('#bHd', me.bz === 'B4' && !napping);
+  showBtn('#bBingo', inMeetSeat(me) && !napping && !(bingo && bingo.my));
   const napTxt = napping ? '일어나기' : '몰래 자기';
   if ($('#bNapTxt').textContent !== napTxt) $('#bNapTxt').textContent = napTxt;
   const terr = onTerrace(me) && !napping;
   showBtn('#bShout', terr);
+  showBtn('#bCig', terr);
+  const cigTxt = me.smoking ? '담배 끄기' : '담배 피기';
+  if ($('#bCigTxt').textContent !== cigTxt) $('#bCigTxt').textContent = cigTxt;
   if (!terr && $('#shoutSheet').classList.contains('show')) $('#shoutSheet').classList.remove('show');
   // 걷기 시작하면 앉아서 하던 동작은 멈춘다
   for (const p of people) if (p.bz && p.state === 'walk' && p.action && (p.action.type === 'type' || p.action.type === 'doze')) p.action = null;
@@ -4970,9 +4984,14 @@ function officeUpdate() {
 }
 
 // ---------- 서류 던지기 ----------
-// 사원 연구리 자리에 앉으면 맞은편 팀장 풍뎅이에게 서류 뭉치를 던질 수 있다
-// 연달아 던지면 팀장 반응이 세진다. 대사 번호를 보내서 모든 화면이 같다
-const PAPER_LINES = ['아야! 뭐야 이거!', '연구리씨... 이거 결재 반려라는 뜻이야?', '그만 던져!! 팀장도 사람이야!!', '어이쿠... 알았어 알았어, 지금 볼게...', '내일부터 연구리씨가 팀장 해!!'];
+// 사원 연구리 자리나 고문 주피 자리(섬 머리)에 앉으면 팀장 풍뎅이에게 서류 뭉치를 던질 수 있다
+// 연달아 던지면 팀장 반응이 세진다. 대사 번호와 자리(w)를 보내서 모든 화면이 같다
+// {n} 은 던진 사람 이름에 '씨'를 붙인 말, {s} 는 거기에 '가'를 붙인 말. 이름이 없으면(혼자 노는 데모) '자네'
+const PAPER_LINES = ['아야! 뭐야 이거!', '{n}... 이거 결재 반려라는 뜻이야?', '그만 던져!! 팀장도 사람이야!!', '어이쿠... 알았어 알았어, 지금 볼게...', '내일부터 {s} 팀장 해!!'];
+const paperName = (p) => {
+  const nm = p === me ? myName : p.name;
+  return nm ? [nm + '씨', nm + '씨가'] : ['자네', '자네가'];
+};
 const sheetGeo = new THREE.BoxGeometry(0.3, 0.006, 0.4);
 const paperM = new THREE.MeshStandardMaterial({ color: 0xf6f4ee, roughness: 0.9 });
 const papers = [];
@@ -4981,13 +5000,20 @@ let paperAt = -99;
 let paperN = 0;
 const leadOf = () => WORKERS.find((w) => w.worker.spot === 'lead');
 const atYeonguri = () => !!me.officeSeat && me.officeSeat === BLD.zones.B4.seatByKey.yeonguri;
+// 서류를 던질 수 있는 자리면 그 자리 이름(yeonguri/jupi)
+const paperSeat = () => {
+  const K = BLD.zones.B4.seatByKey;
+  if (!me.officeSeat) return null;
+  return me.officeSeat === K.yeonguri ? 'yeonguri' : me.officeSeat === K.jupi ? 'jupi' : null;
+};
 
 function throwPaper() {
-  if (!atYeonguri() || simT - paperAt < 1.6) return;
+  const w = paperSeat();
+  if (!w || simT - paperAt < 1.6) return;
   paperN = simT - paperAt < 30 ? paperN + 1 : 0;
   paperAt = simT;
   const i = paperN < 3 ? paperN : 3 + ((paperN - 3) % (PAPER_LINES.length - 3));
-  send('paper', { i });
+  send('paper', { i, w });
   paperEffects(me, i);
 }
 $('#bPaper').onclick = throwPaper;
@@ -5009,7 +5035,7 @@ function paperEffects(p, i) {
     from.y -= 0.2;
     g.position.copy(from);
     scene.add(g);
-    papers.push({ g, from, to: t.headWorld(new THREE.Vector3()), k: 0, who: t, i: i % PAPER_LINES.length });
+    papers.push({ g, from, to: t.headWorld(new THREE.Vector3()), k: 0, who: t, i: i % PAPER_LINES.length, n: paperName(p) });
   });
 }
 
@@ -5040,7 +5066,7 @@ function paperUpdate(dt) {
     w.do('hurt');
     w.faceMood = 'angry';
     later(3, () => w.faceMood === 'angry' && (w.faceMood = null));
-    say(w, PAPER_LINES[P.i], 2.4, P.i === 2 || P.i === 4);
+    say(w, PAPER_LINES[P.i].replace('{n}', P.n[0]).replace('{s}', P.n[1]), 2.4, P.i === 2 || P.i === 4);
     w.timer = Math.max(w.timer, 5);
   }
   for (let n = sheets.length - 1; n >= 0; n--) {
@@ -5171,6 +5197,289 @@ function zzz(p) {
   });
 }
 
+// ---------- 회의실 빙고 ----------
+// 회의실 의자에 앉으면 '빙고'. 만든 사람(host)이 판 크기(N×N)와 목표 줄 수를 정하고 시작하면,
+// 그때 회의실 의자에 앉아 있는 사람이 모두 참가한다. 혼자면 팀장 풍뎅이(CPU)가 같이 한다
+// 판은 1~N² 를 각자 화면에서 섞는다. 차례대로 숫자를 부르면 모두 지운다. 목표 줄을 먼저 만든 사람이 이긴다
+// 신호 bg{e: start|call|win|leave}. 차례가 20초 넘게 안 오면 host 가 대신 아무 숫자나 부른다
+const BG_CPU = 'bgcpu';
+const BG_TURN_SEC = 20;
+const BG_CPU_SEC = 1.6;
+let bingo = null;
+let bgPickN = 5;
+let bgPickGoal = 3;
+const bgDefaultGoal = (n) => (n >= 5 ? 3 : n === 4 ? 2 : 1);
+const inMeetSeat = (p) => !!p.officeSeat && meetSeats().includes(p.officeSeat);
+
+function bgName(id) {
+  if (id === BG_CPU) return '팀장 풍뎅이';
+  if (id === MY_ID) return myName || '나';
+  const r = peers.get(id);
+  return r ? r.p.name : '누군가';
+}
+const bgPerson = (id) => (id === BG_CPU ? leadOf() : personById(id));
+
+function bgShuffle(n) {
+  const a = [];
+  for (let i = 1; i <= n * n; i++) a.push(i);
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// 다 지운 줄 수와 그 줄에 든 칸
+function bgLines(board, n, called) {
+  const hit = (i) => called.has(board[i]);
+  const lines = [];
+  for (let r = 0; r < n; r++) lines.push([...Array(n)].map((_, c) => r * n + c));
+  for (let c = 0; c < n; c++) lines.push([...Array(n)].map((_, r) => r * n + c));
+  lines.push([...Array(n)].map((_, i) => i * n + i));
+  lines.push([...Array(n)].map((_, i) => i * n + (n - 1 - i)));
+  const done = lines.filter((L) => L.every(hit));
+  return { count: done.length, cells: new Set(done.flat()), lines };
+}
+
+// CPU 는 이미 많이 지운 줄에 든 숫자부터 부른다
+function bgCpuPick(board, n, called) {
+  const { lines } = bgLines(board, n, called);
+  let best = -1;
+  let picks = [];
+  board.forEach((num, i) => {
+    if (called.has(num)) return;
+    let sc = 0;
+    for (const L of lines) if (L.includes(i)) sc += L.filter((j) => called.has(board[j])).length;
+    if (sc > best) {
+      best = sc;
+      picks = [num];
+    } else if (sc === best) picks.push(num);
+  });
+  return pick(picks);
+}
+
+// 만들기 창
+function bgRenderPick() {
+  $('#bgSize').innerHTML = '';
+  for (const n of [3, 4, 5, 6]) {
+    const b = document.createElement('button');
+    b.textContent = n + '×' + n;
+    b.className = n === bgPickN ? 'on' : '';
+    b.onclick = () => {
+      bgPickN = n;
+      bgPickGoal = bgDefaultGoal(n);
+      bgRenderPick();
+    };
+    $('#bgSize').appendChild(b);
+  }
+  $('#bgGoal').innerHTML = '';
+  for (let g = 1; g <= Math.min(5, bgPickN * 2 + 2); g++) {
+    const b = document.createElement('button');
+    b.textContent = g + '줄';
+    b.className = g === bgPickGoal ? 'on' : '';
+    b.onclick = () => {
+      bgPickGoal = g;
+      bgRenderPick();
+    };
+    $('#bgGoal').appendChild(b);
+  }
+}
+
+$('#bBingo').onclick = () => {
+  if (blocked() || !inMeetSeat(me)) return;
+  if (bingo) return toast('지금 빙고 중이에요');
+  bgRenderPick();
+  $('#bingoSheet').classList.add('show');
+};
+$('#bingoClose').onclick = () => $('#bingoSheet').classList.remove('show');
+$('#bgStart').onclick = () => {
+  $('#bingoSheet').classList.remove('show');
+  if (bingo || !inMeetSeat(me)) return;
+  const order = [MY_ID, ...[...peers.values()].filter((r) => r.p.bz === 'B4' && inMeetSeat(r.p)).map((r) => r.id)];
+  if (order.length === 1) order.push(BG_CPU);
+  const g = { id: Math.random().toString(36).slice(2, 8), host: MY_ID, n: bgPickN, goal: bgPickGoal, order };
+  send('bg', { e: 'start', ...g });
+  startBingo(g);
+};
+$('#bgQuit').onclick = () => {
+  if (!bingo) return;
+  if (bingo.over) return endBingo();
+  send('bg', { e: 'leave', id: bingo.id });
+  leaveBingo(MY_ID);
+};
+
+function startBingo(g) {
+  bingo = { id: g.id, host: g.host, n: g.n, goal: g.goal, order: g.order.slice(), called: [], calledSet: new Set(), turn: 0, turnAt: simT, winners: [], over: false, announced: false };
+  bingo.my = bingo.order.includes(MY_ID) ? bgShuffle(g.n) : null;
+  if (g.host === MY_ID && bingo.order.includes(BG_CPU)) bingo.cpu = bgShuffle(g.n);
+  const hp = bgPerson(g.host);
+  if (hp) say(hp, `빙고 할 사람~ ${g.n}×${g.n}, ${g.goal}줄!`, 2.2);
+  if (bingo.my) {
+    $('#bingo').hidden = false;
+    renderBingo();
+  }
+}
+
+function endBingo() {
+  bingo = null;
+  $('#bingo').hidden = true;
+}
+
+const bgTurnId = () => (bingo && bingo.order.length ? bingo.order[bingo.turn % bingo.order.length] : null);
+
+function callBingo(num, by) {
+  const B = bingo;
+  if (!B || B.over || B.calledSet.has(num) || num < 1 || num > B.n * B.n) return;
+  if (by !== bgTurnId()) return;
+  B.called.push(num);
+  B.calledSet.add(num);
+  B.turn = (B.order.indexOf(by) + 1) % B.order.length;
+  B.turnAt = simT;
+  const p = bgPerson(by);
+  if (p) say(p, num + '!', 1.4);
+  // 내 판과 CPU 판(host 만)에서 목표 줄을 채웠는지
+  if (B.my && !B.announced && bgLines(B.my, B.n, B.calledSet).count >= B.goal) {
+    B.announced = true;
+    send('bg', { e: 'win', id: B.id });
+    winBingo(MY_ID);
+  }
+  if (B.cpu && !B.cpuWon && bgLines(B.cpu, B.n, B.calledSet).count >= B.goal) {
+    B.cpuWon = true;
+    send('bg', { e: 'win', id: B.id, by: BG_CPU });
+    winBingo(BG_CPU);
+  }
+  if (B.my) renderBingo();
+}
+
+// 같은 숫자에 여럿이 동시에 채우면 공동 우승(0.6초 안에 들어온 것까지)
+function winBingo(id) {
+  const B = bingo;
+  if (!B || B.winners.includes(id)) return;
+  if (B.over && simT - B.overAt > 0.6) return;
+  if (!B.over) {
+    B.over = true;
+    B.overAt = simT;
+    later(6, () => bingo === B && endBingo());
+  }
+  B.winners.push(id);
+  const p = bgPerson(id);
+  if (p) {
+    say(p, '빙고!!', 2.6, true);
+    if (!p.action && p.state !== 'walk') p.do('yeah');
+    W.sparkle(p.headWorld(new THREE.Vector3()));
+  }
+  if (me.bz === 'B4') sound.yeah();
+  if (B.my) renderBingo();
+}
+
+function leaveBingo(id) {
+  const B = bingo;
+  if (!B) return;
+  const i = B.order.indexOf(id);
+  if (i < 0) return;
+  if (id === B.host) {
+    if (B.my && id !== MY_ID) toast('빙고 만든 사람이 나가서 끝났어요');
+    return endBingo();
+  }
+  const cur = bgTurnId();
+  B.order.splice(i, 1);
+  if (id === MY_ID) {
+    B.my = null;
+    $('#bingo').hidden = true;
+  }
+  // 사람이 하나만 남으면(CPU 빼고) 끝
+  if (B.order.filter((q) => q !== BG_CPU).length < 1 || B.order.length < 2) {
+    if (B.my) toast('같이 할 사람이 없어서 빙고가 끝났어요');
+    return endBingo();
+  }
+  B.turn = cur === id ? i % B.order.length : Math.max(0, B.order.indexOf(cur));
+  B.turnAt = simT;
+  if (B.my) renderBingo();
+}
+
+function onBingoNet(d, from) {
+  if (d.e === 'start') {
+    if (!Array.isArray(d.order) || !(d.n >= 3 && d.n <= 6)) return;
+    if (bingo && !bingo.over) return;
+    startBingo({ id: String(d.id), host: from, n: d.n | 0, goal: Math.max(1, d.goal | 0), order: d.order.map(String) });
+    return;
+  }
+  if (!bingo || d.id !== bingo.id) return;
+  if (d.e === 'call') {
+    const by = typeof d.by === 'string' ? d.by : from;
+    if (by !== from && from !== bingo.host) return;
+    callBingo(d.n | 0, by);
+  } else if (d.e === 'win') {
+    const by = d.by === BG_CPU && from === bingo.host ? BG_CPU : from;
+    winBingo(by);
+  } else if (d.e === 'leave') leaveBingo(from);
+}
+
+// 내 판 그리기
+function renderBingo() {
+  const B = bingo;
+  if (!B || !B.my) return;
+  const n = B.n;
+  const L = bgLines(B.my, n, B.calledSet);
+  const myTurn = !B.over && bgTurnId() === MY_ID;
+  $('#bgTitle').textContent = `빙고 ${n}×${n} · ${B.goal}줄`;
+  const st = $('#bgStatus');
+  st.classList.toggle('my', myTurn);
+  if (B.over) st.textContent = B.winners.map(bgName).join(', ') + ' 빙고!' + (B.winners.includes(MY_ID) ? ' 축하해요!' : '');
+  else st.textContent = (myTurn ? '내 차례! 숫자를 누르세요' : `${bgName(bgTurnId())} 차례...`) + ` · ${L.count}/${B.goal}줄`;
+  const grid = $('#bgGrid');
+  grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+  if (grid.children.length !== n * n) {
+    grid.innerHTML = '';
+    for (let i = 0; i < n * n; i++) grid.appendChild(document.createElement('button'));
+  }
+  B.my.forEach((num, i) => {
+    const b = grid.children[i];
+    if (b.textContent !== String(num)) b.textContent = num;
+    b.onclick = () => {
+      const C = bingo;
+      if (!C || C.over || !C.my || bgTurnId() !== MY_ID || C.calledSet.has(num)) return;
+      send('bg', { e: 'call', id: C.id, n: num });
+      callBingo(num, MY_ID);
+    };
+    const hit = B.calledSet.has(num);
+    b.className = L.cells.has(i) ? 'hit line' : hit ? 'hit' : '';
+    b.disabled = !myTurn || hit;
+  });
+  $('#bgLast').textContent = B.called.length ? '부른 숫자: ' + B.called.slice(-8).join(', ') : '';
+}
+
+function bingoUpdate() {
+  const B = bingo;
+  if (!B) return;
+  // 만든 사람이 사라졌으면 끝
+  if (B.host !== MY_ID && !personById(B.host)) return endBingo();
+  // 내가 회의실 의자에서 일어나면 빠진다
+  if (B.my && !B.over && !inMeetSeat(me)) {
+    send('bg', { e: 'leave', id: B.id });
+    toast('자리에서 일어나서 빙고에서 빠졌어요');
+    return leaveBingo(MY_ID);
+  }
+  if (B.over) return;
+  // 나간 친구는 빼고
+  for (const id of B.order) if (id !== BG_CPU && id !== MY_ID && !personById(id)) return leaveBingo(id);
+  if (B.host !== MY_ID) return;
+  const cur = bgTurnId();
+  if (cur === BG_CPU && simT - B.turnAt > BG_CPU_SEC) {
+    const num = bgCpuPick(B.cpu, B.n, B.calledSet);
+    send('bg', { e: 'call', id: B.id, n: num, by: BG_CPU });
+    callBingo(num, BG_CPU);
+  } else if (cur !== BG_CPU && simT - B.turnAt > BG_TURN_SEC) {
+    // 너무 오래 안 부르면 대신 아무 숫자나
+    const left = [];
+    for (let i = 1; i <= B.n * B.n; i++) if (!B.calledSet.has(i)) left.push(i);
+    if (!left.length) return endBingo();
+    const num = pick(left);
+    send('bg', { e: 'call', id: B.id, n: num, by: cur });
+    callBingo(num, cur);
+  }
+}
+
 // ---------- 테라스에서 소리지르기 ----------
 // 4층 테라스에 나가면 적은 말을 그대로 크게 외친다. 같은 층 직원이 가끔 반응한다
 const TERRACE_X = -8.05;
@@ -5288,7 +5597,8 @@ function bldSeparate() {
   if (!me.bz) return;
   const Z = BLD.zones[me.bz];
   const ps = people.filter((p) => p.bz === me.bz && p.state !== 'sit' && !p.knocked);
-  const fixed = (p) => p.worker && !(meet && meet.t === p);
+  // 회의실·담배·얼차려로 불려 나온 직원은 다른 사람처럼 비켜 간다
+  const fixed = (p) => p.worker && !(meet && meet.t === p) && !(hdEv && hdEv.t === p);
   for (let i = 0; i < ps.length; i++) {
     for (let j = i + 1; j < ps.length; j++) {
       const a = ps[i];
@@ -5516,6 +5826,266 @@ function meetUpdate() {
   }
 }
 
+// ---------- 희동 상무: 담배 타임, 얼차려 ----------
+// 4층 '희동 상무' 버튼 → 창에서 고른다. 부른 사람이 'smoke' / 'drill' 을 보내 모든 화면이 같게 흘러간다
+// 희동이는 자리에서 일어나 갔다가 끝나면 돌아와 앉는다. 비운 동안 자리는 계속 차지
+const SMOKE_HD = { x: -9.15, z: -4.1 };
+const SMOKE_P = { x: -10.05, z: -4.1 };
+const SMOKE_SEC = 13;
+const SMOKE_TALK = ['끅... 담배는 역시 테라스지~', '재무팀 숫자가 자꾸 두 개로 보여...', '이거 피우고 한 잔 하러 갈까?', '대표님한텐 비밀이다~'];
+// 얼차려는 정해진 곳 없이 부른 사람 앞(0.9m, 희동이 쪽)으로 희동이가 온다
+const DRILL_GAP = 0.9;
+const drillSpot = (p, t) => {
+  let dx = t.pos.x - p.pos.x;
+  let dz = t.pos.z - p.pos.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 0.05) {
+    dx = Math.sin(p.yaw);
+    dz = Math.cos(p.yaw);
+  } else {
+    dx /= d;
+    dz /= d;
+  }
+  return { x: p.pos.x + dx * DRILL_GAP, z: p.pos.z + dz * DRILL_GAP };
+};
+const DRILL_REPS = 8;
+const DRILL_COUNT = ['하나!', '둘!', '셋!', '넷!', '다섯!', '여섯!', '일곱!', '여덟!'];
+const hdW = () => WORKERS.find((w) => w.worker.spot === 'cfo');
+let hdEv = null;
+// 담배 연기
+const puffs = [];
+const puffGeo = new THREE.SphereGeometry(0.06, 8, 6);
+
+$('#bHd').onclick = () => {
+  if (blocked() || me.bz !== 'B4') return;
+  $('#hdSheet').classList.add('show');
+};
+$('#hdClose').onclick = () => $('#hdSheet').classList.remove('show');
+document.querySelectorAll('[data-hd]').forEach(
+  (b) =>
+    (b.onclick = () => {
+      $('#hdSheet').classList.remove('show');
+      if (me.bz !== 'B4') return;
+      const t = hdW();
+      if (!t || t.knocked) return;
+      const k = b.dataset.hd === 'drill' ? 'drill' : 'smoke';
+      // 얼차려는 내가 서 있는 곳으로 부른다. 가는 곳을 보내서 모든 화면이 같게
+      const H = k === 'drill' ? drillSpot(me, t) : null;
+      send('hdev', H ? { k, x: +H.x.toFixed(2), z: +H.z.toFixed(2) } : { k });
+      startHdEv(me, k, H);
+      if (k === 'smoke') bldGo(b4(SMOKE_P));
+    })
+);
+
+// 하던 게 있으면 끊고 새로 시작한다(바쁘다고 막지 않는다)
+function stopHdEv() {
+  const E = hdEv;
+  if (!E) return;
+  hdEv = null;
+  E.t.holdCig(false);
+  if (E.k === 'smoke' && !E.p.smoking) E.p.holdCig(false);
+  E.t.faceMood = null;
+  E.t.action = null;
+}
+
+function startHdEv(p, k, H) {
+  const t = hdW();
+  if (!t) return;
+  stopHdEv();
+  const seat = BLD.zones.B4.seatByKey.cfo;
+  const E = (hdEv = { k, p, t, seat, phase: 'go', until: simT + 25, n: 0, H: k === 'smoke' ? b4(SMOKE_HD) : H || drillSpot(p, t), tries: 0 });
+  if (k === 'smoke') say(p, '상무님, 담배 한 대 하실래요?', 2.2);
+  else say(p, '희동 상무! 이리 나와!', 2.2, true);
+  t.timer = 99;
+  later(1.0, () => {
+    if (hdEv !== E) return;
+    t.idlePose = null;
+    t.baseY = 0;
+    t.action = null;
+    t.walkTo(BLD.path('B4', t.pos, E.H));
+    E.walkAt = simT;
+    seat.occupant = t;
+    say(t, k === 'smoke' ? '끅... 좋지! 테라스 가자~' : '끅... 나? 왜?', 2);
+  });
+}
+
+function hdBack(E, line) {
+  E.phase = 'back';
+  E.t.holdCig(false);
+  if (E.k === 'smoke' && !E.p.smoking) E.p.holdCig(false);
+  if (line) say(E.t, line, 2.4);
+  E.t.walkTo(BLD.path('B4', E.t.pos, E.seat));
+}
+
+function hdEvUpdate(dt) {
+  smokeUpdate(dt);
+  cigUpdate();
+  const E = hdEv;
+  if (!E) return;
+  const { t, p } = E;
+  if (E.phase !== 'back' && !people.includes(p)) return hdBack(E, '...뭐야, 부르고 갔어?');
+  if (E.phase === 'go') {
+    const H = E.H;
+    let tHere, pHere;
+    if (E.k === 'smoke') {
+      const P = b4(SMOKE_P);
+      tHere = t.state !== 'walk' && Math.hypot(t.pos.x - H.x, t.pos.z - H.z) < 0.6;
+      pHere = p.bz === 'B4' && p.state !== 'walk' && Math.hypot(p.pos.x - P.x, p.pos.z - P.z) < 1.0;
+    } else {
+      // 희동이가 걸어와 멈추면 시작. 그새 부른 사람이 멀리 갔으면 다시 따라간다(세 번까지)
+      tHere = E.walkAt !== undefined && t.state !== 'walk' && simT > E.walkAt + 0.1;
+      pHere = p.bz === 'B4' && p.state !== 'walk';
+      if (tHere && pHere && Math.hypot(t.pos.x - p.pos.x, t.pos.z - p.pos.z) > DRILL_GAP + 0.7 && E.tries < 3) {
+        E.tries++;
+        E.H = drillSpot(p, t);
+        t.walkTo(BLD.path('B4', t.pos, E.H));
+        E.walkAt = simT;
+        tHere = false;
+      }
+    }
+    if (tHere && pHere) {
+      t.targetYaw = Math.atan2(p.pos.x - t.pos.x, p.pos.z - t.pos.z);
+      p.targetYaw = Math.atan2(t.pos.x - p.pos.x, t.pos.z - p.pos.z);
+      E.n = 0;
+      if (E.k === 'smoke') {
+        stopCig(p);
+        t.holdCig(true);
+        p.holdCig(true);
+        E.phase = 'smoke';
+        E.until = simT + SMOKE_SEC;
+        E.next = simT + 0.4;
+      } else {
+        p.action = null;
+        p.do('warn');
+        say(p, '앉았다 일어서! 실시!', 1.6, true);
+        later(1.0, () => hdEv === E && say(t, '실시!', 0.8, true));
+        E.phase = 'ready';
+        E.next = simT + 1.6;
+      }
+    } else if (simT > E.until) hdBack(E, E.k === 'smoke' ? '...안 와? 혼자 피운다' : '...뭐야, 아무도 없네.');
+  } else if (E.phase === 'smoke') {
+    if (simT >= E.next) {
+      // 번갈아 한 모금씩, 희동이는 두 번에 한 번 수다
+      const who = E.n % 2 ? p : t;
+      if (!who.action) who.do('smoke');
+      later(1.3, () => puff(who));
+      if (E.n % 2 === 0) say(t, SMOKE_TALK[(E.n / 2) % SMOKE_TALK.length], 2.4);
+      E.n++;
+      E.next += 1.6;
+    }
+    if (simT >= E.until) hdBack(E, '자, 들어가서 일하자... 끅');
+  } else if (E.phase === 'ready' && simT >= E.next) {
+    t.action = null;
+    t.do('squat', DRILL_REPS * 0.7);
+    t.faceMood = 'sad';
+    E.phase = 'drill';
+    E.next = simT + 0.35;
+  } else if (E.phase === 'drill' && simT >= E.next) {
+    // 앉을 때마다 숫자를 센다
+    if (E.n < DRILL_REPS) {
+      say(t, DRILL_COUNT[E.n], 0.6, true);
+      if (E.n === 4) say(p, '목소리 작다?!', 1.0, true);
+      E.n++;
+      E.next += 0.7;
+    } else {
+      t.faceMood = null;
+      hdBack(E, '헉... 헉... 상무 체면이...');
+    }
+  } else if (E.phase === 'back' && t.state !== 'walk') {
+    hdEv = null;
+    t.faceMood = null;
+    if (E.seat.occupant && E.seat.occupant !== t) return;
+    t.sitAt(E.seat);
+    t.timer = rnd(6, 10);
+  }
+}
+
+// ---------- 테라스에서 혼자 담배 피기 ----------
+// 테라스에 있으면 그 자리에서 한 대(12초). 3초마다 한 모금 + 연기. 다시 누르면 끈다. 실내로 들어가면 꺼진다
+// 신호 cig{on}. 연기와 모금은 화면마다 따로 돌린다(모양만)
+const CIG_SEC = 12;
+
+$('#bCig').onclick = () => {
+  if (blocked()) return;
+  if (me.smoking) {
+    send('cig', { on: 0 });
+    return stopCig(me);
+  }
+  if (!onTerrace(me)) return toast('테라스에서만 피울 수 있어요');
+  if (hdEv && hdEv.k === 'smoke' && hdEv.p === me && hdEv.phase !== 'back') return toast('상무님이랑 피우는 중이에요');
+  send('cig', { on: 1 });
+  startCig(me);
+};
+
+function startCig(p) {
+  p.smoking = true;
+  p.smokeUntil = simT + CIG_SEC;
+  p.smokeNext = simT + 0.5;
+  p.holdCig(true);
+}
+
+function stopCig(p) {
+  if (!p.smoking) return;
+  p.smoking = false;
+  p.holdCig(false);
+}
+
+function cigUpdate() {
+  for (const p of people) {
+    if (!p.smoking) continue;
+    // 다 피웠거나 실내로 들어가면 끈다(실내 금연). 친구는 화면마다 위치가 조금 늦으니 본인이 보낸 신호로만 끈다
+    if (simT >= p.smokeUntil) {
+      stopCig(p);
+      continue;
+    }
+    if (p === me && !onTerrace(me)) {
+      toast('실내는 금연이에요');
+      send('cig', { on: 0 });
+      stopCig(me);
+      continue;
+    }
+    if (simT >= p.smokeNext) {
+      p.smokeNext = simT + 3;
+      if (!p.action) p.do('smoke');
+      later(1.3, () => p.smoking && puff(p));
+    }
+  }
+}
+
+// 입가에서 연기가 몽글몽글 올라가며 흩어진다
+function puff(p) {
+  if (p.bz !== me.bz) return;
+  // 입 앞(머리 가운데에서 앞쪽 아래)
+  const at = p.headShape.getWorldPosition(new THREE.Vector3());
+  at.x += Math.sin(p.yaw) * 0.26;
+  at.z += Math.cos(p.yaw) * 0.26;
+  at.y -= 0.06;
+  for (let k = 0; k < 4; k++) {
+    const m = new THREE.Mesh(puffGeo, new THREE.MeshBasicMaterial({ color: 0xd8d8dc, transparent: true, opacity: 0.55, depthWrite: false }));
+    m.position.set(at.x + rnd(-0.04, 0.04), at.y, at.z + rnd(-0.04, 0.04));
+    scene.add(m);
+    puffs.push({ m, life: 1.8 + k * 0.25, max: 1.8 + k * 0.25, vx: rnd(-0.12, 0.12), vz: rnd(-0.12, 0.12) });
+  }
+}
+
+function smokeUpdate(dt) {
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const P = puffs[i];
+    P.life -= dt;
+    const k = 1 - P.life / P.max;
+    P.m.position.x += P.vx * dt;
+    P.m.position.z += P.vz * dt;
+    P.m.position.y += 0.35 * dt;
+    P.m.scale.setScalar(1 + k * 2.5);
+    P.m.material.opacity = 0.55 * Math.max(0, 1 - k);
+    if (P.life <= 0) {
+      scene.remove(P.m);
+      P.m.material.dispose();
+      puffs.splice(i, 1);
+    }
+  }
+}
+
 // 엘리베이터에 타면 안으로 들어가서 층을 고른다
 function rideElev() {
   if (me.bz === 'EV' || !FLOORS.includes(me.bz)) return;
@@ -5681,6 +6251,8 @@ function tick(dt) {
   knockRunUpdate();
   napRunUpdate();
   napUpdate(dt);
+  hdEvUpdate(dt);
+  bingoUpdate();
   bldTriggers();
   workerTick(dt);
   W.update(dt, t);
@@ -5782,4 +6354,4 @@ if (QS.has('bar')) {
 }
 
 // 확인용. 주소에 ?debug 를 붙였을 때만 연다
-if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => staffFor(me.seat.table).jobs.push({ table: me.seat.table, kind }), yeil, staffFor, getYSulk: () => ySulk, sorryStaff, startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, beginWoo, getWoo: () => woo, FUNG, startTease, sorryPungsun, getPSulk: () => pSulk, hdBegin, getHd: () => hd, heedong, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, doubles, getTL: () => TL, openLobby, hostStart, joinSlot, enterDoubles, getTennisMode: () => tennisMode, BLD, enterBld, leaveBld, bldMove, bldGo, openElev, rideElev, officeGo, throwPaper, callMeet, getMeet: () => meet, myOfficeAct, knockPungsun, pungsunW, WORKERS, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, getYRoam: () => yRoam, pickStaff, onTerrace, wakeNap, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };
+if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => staffFor(me.seat.table).jobs.push({ table: me.seat.table, kind }), yeil, staffFor, getYSulk: () => ySulk, sorryStaff, startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, beginWoo, getWoo: () => woo, FUNG, startTease, sorryPungsun, getPSulk: () => pSulk, hdBegin, getHd: () => hd, heedong, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, doubles, getTL: () => TL, openLobby, hostStart, joinSlot, enterDoubles, getTennisMode: () => tennisMode, BLD, enterBld, leaveBld, bldMove, bldGo, openElev, rideElev, officeGo, throwPaper, callMeet, getMeet: () => meet, myOfficeAct, knockPungsun, pungsunW, WORKERS, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, getYRoam: () => yRoam, pickStaff, onTerrace, wakeNap, getHdEv: () => hdEv, hdW, getBingo: () => bingo, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };
