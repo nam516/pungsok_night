@@ -5,7 +5,7 @@
 // 구역 코드: B0 앞길, BM 지하 1층, B1~B4 지상 1~4층, EV 엘리베이터 안
 import * as THREE from 'three';
 import { mergeStatic } from './merge.js';
-import { gridPath } from './path.js';
+import { gridPath, gridSpot } from './path.js';
 
 const BX = -140;
 const FLOOR_GAP = 60;
@@ -1397,10 +1397,16 @@ export function buildBuilding(scene) {
     return gridPath(from, to, Z.obstacles, Z.bounds);
   }
 
+  // 사람 둘레에서 다른 사람이 와서 설 빈자리(책상 너머·가구 바로 옆 말고)
+  function spotNear(code, center, from) {
+    const Z = zones[code];
+    return gridSpot(center, from, Z.obstacles, Z.bounds);
+  }
+
   const seatById = (id) => {
     const [code, i] = String(id || '').split(':');
     return (zones[code] && zones[code].seats[+i]) || null;
   };
 
-  return { zones, picks, setActive, update, path, seatById };
+  return { zones, picks, setActive, update, path, spotNear, seatById };
 }

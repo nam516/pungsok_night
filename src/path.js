@@ -329,3 +329,39 @@ function roundCorners(from, pts, clear) {
   }
   return out;
 }
+
+// center(사람) 둘레 radii 거리에서 다른 사람이 와서 설 자리를 고른다
+// 막힘에서 한 칸 넘게 떨어져 있고, center 에서 곧게 보이며(책상 너머 아님), from 에 가까운 곳. 없으면 null
+export function gridSpot(center, from, rects, bounds, radii = [0.9, 1.1, 1.3, 1.6, 2.0], cell = 0.2, pad = 0.18) {
+  let G = gridCache.get(rects);
+  if (!G) {
+    G = makeGrid(rects, bounds, cell, pad);
+    gridCache.set(rects, G);
+  }
+  const { nx, nz, block, near, b } = G;
+  const toCell = (p) => [Math.floor((p.x - b.x0) / cell), Math.floor((p.z - b.z0) / cell)];
+  const c0 = nearestFree(G, ...toCell(center));
+  // 먼저 가구에서 한 칸 넘게 떨어진 곳, 없으면 막힘만 아닌 곳
+  for (const minNear of [2, 1]) {
+    for (const r of radii) {
+      let best = null;
+      let bestD = Infinity;
+      for (let k = 0; k < 24; k++) {
+        const a = (k / 24) * Math.PI * 2;
+        const pt = { x: center.x + Math.sin(a) * r, z: center.z + Math.cos(a) * r };
+        const [i, kk] = toCell(pt);
+        if (i < 0 || kk < 0 || i >= nx || kk >= nz) continue;
+        const m = kk * nx + i;
+        if (block[m] || near[m] < minNear) continue;
+        if (!clearLine(G, c0, [i, kk])) continue;
+        const d = Math.hypot(pt.x - from.x, pt.z - from.z);
+        if (d < bestD) {
+          bestD = d;
+          best = pt;
+        }
+      }
+      if (best) return best;
+    }
+  }
+  return null;
+}

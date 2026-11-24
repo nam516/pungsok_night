@@ -3202,7 +3202,7 @@ function onNet(m) {
     else if (d.e === 'say' && typeof d.t === 'string') mtgSay(d.t, !!d.hard);
     else if (d.e === 'end') endMtg('...다음부턴 정리해서 오세요.');
   } else if (m.t === 'det') {
-    onDetNet(d, p);
+    onDetNet(d, p, m.f);
   } else if (m.t === 'bg') {
     onBingoNet(d, m.f);
   } else if (m.t === 'cig') {
@@ -5513,11 +5513,13 @@ function bingoUpdate() {
 }
 
 // ---------- 회의실 탐정단 ----------
-// 회의실 의자에 앉은 사람들이 다 같이 사건을 푼다. 예/아니오 질문을 하면 AI 기록관(서버 /api/detective, Gemini)이 답한다
-// 진상은 서버에만 있다. 묻거나 추리한 사람의 화면이 서버에 묻고, 결과를 신호로 모두에게 보낸다
-// 신호 det{e: start|qa|guess|reveal|end}
+// 회의실 의자에 앉은 사람들이 같이 사건을 푼다. 예/아니오 질문을 하면 AI 기록관(서버 /api/detective, Gemini)이 답한다
+// 질문과 추리는 차례대로 한 사람씩. 추리에서 맞힌 '밝혀낼 것'은 쌓이고, 다 밝혀내면 해결
+// 진상은 서버에만 있다. 차례인 사람의 화면이 서버에 묻고 결과를 신호로 모두에게 보낸다
+// 신호 det{e: start|join|qa|guess|skip|reveal|end}. 차례가 오래 안 넘어가면 연 사람(host)이 넘긴다
 const DET_API = '/api/detective';
 const DET_A = { yes: '예', no: '아니오', irrelevant: '상관없음' };
+const DET_TURN_SEC = 60;
 let det = null;
 let detBusy = false;
 
@@ -5540,11 +5542,15 @@ async function detCall(body) {
 
 function detErr(e) {
   const m = e && e.message;
-  if (m === 'busy') toast('기록관이 잠깐 숨 돌리는 중이에요. 몇 초 뒤에 다시 물어봐 주세요');
+  if (m === 'busy') toast('기록관이 잠깐 숨 돌리는 중이에요. 몇 초 뒤에 다시 해 주세요');
   else if (m === 'nokey') toast('기록관이 아직 출근 전이에요 (Vercel 에 GEMINI_API_KEY 설정 필요)');
   else if (m === 'offline') toast('탐정단은 배포된 주소에서만 할 수 있어요');
   else toast('기록관 대답을 못 받았어요. 다시 해 볼까요?');
 }
+
+const detName = (id) => (id === MY_ID ? myName || '나' : (peers.get(id) && peers.get(id).p.name) || '누군가');
+const detTurnId = () => (det && det.order.length ? det.order[det.turn % det.order.length] : null);
+const detMyTurn = () => !!det && !det.over && detTurnId() === MY_ID;
 
 $('#bDet').onclick = async () => {
   if (blocked() || !inMeetSeat(me)) return;
@@ -5561,14 +5567,16 @@ $('#bDet').onclick = async () => {
     const b = document.createElement('button');
     b.textContent = c.title;
     const sm = document.createElement('small');
-    sm.textContent = c.level + ' · ' + c.setup.slice(0, 40) + '…';
+    sm.textContent = c.level + ' · ' + c.setup.slice(0, 50) + '…';
     b.appendChild(sm);
     b.onclick = () => {
       $('#detSheet').classList.remove('show');
       if (!inMeetSeat(me)) return;
-      const g = { id: Math.random().toString(36).slice(2, 8), caseId: c.id, title: c.title, setup: c.setup };
+      // 회의실 의자에 앉은 사람이 모두 탐정. 연 사람부터 차례
+      const order = [MY_ID, ...[...peers.values()].filter((r) => r.p.bz === 'B4' && inMeetSeat(r.p)).map((r) => r.id).sort()];
+      const g = { id: Math.random().toString(36).slice(2, 8), caseId: c.id, title: c.title, setup: c.setup, goals: (c.goals || []).slice(0, 5), order };
       send('det', { e: 'start', ...g });
-      startDet(g, me);
+      startDet(g, MY_ID);
     };
     box.appendChild(b);
   }
@@ -5577,9 +5585,30 @@ $('#bDet').onclick = async () => {
 };
 $('#detClose').onclick = () => $('#detSheet').classList.remove('show');
 
-function startDet(g, by) {
-  det = { id: g.id, caseId: g.caseId, title: String(g.title).slice(0, 40), setup: String(g.setup).slice(0, 400), log: [], asked: new Map(), q: 0, tries: 0, over: false, truth: '' };
-  if (by) say(by, `사건 파일을 열었어요: ${det.title}`, 2.2);
+function startDet(g, host) {
+  det = {
+    id: g.id,
+    host,
+    caseId: g.caseId,
+    title: String(g.title).slice(0, 40),
+    setup: String(g.setup).slice(0, 600),
+    goals: (g.goals || []).map((x) => String(x).slice(0, 40)),
+    found: [],
+    order: (g.order || [host]).map(String),
+    turn: 0,
+    turnAt: simT,
+    log: [],
+    asked: new Map(),
+    q: 0,
+    tries: 0,
+    over: false,
+    truth: '',
+  };
+  det.found = det.goals.map(() => false);
+  const p = personById(host);
+  if (p) say(p, `사건 파일을 열었어요: ${det.title}`, 2.2);
+  $('#det').classList.remove('mini');
+  $('#detMini').textContent = '접기';
   renderDet();
 }
 
@@ -5588,82 +5617,120 @@ function endDet() {
   $('#det').hidden = true;
 }
 
+// 차례 넘기기. by 의 다음 사람
+function detNext(by) {
+  const D = det;
+  if (!D || !D.order.length) return;
+  const i = D.order.indexOf(by);
+  D.turn = i < 0 ? D.turn : (i + 1) % D.order.length;
+  D.turnAt = simT;
+}
+
 const detNorm = (q) => String(q).replace(/[\s?？.!~]+/g, '');
 
-// 질문. 이미 나온 질문이면 서버에 다시 묻지 않는다
+// 질문. 내 차례에만. 이미 나온 질문이면 서버에 다시 묻지 않는다
 $('#detAsk').onsubmit = async (e) => {
   e.preventDefault();
   const D = det;
   const q = $('#detQ').value.trim().slice(0, 80);
   if (!D || D.over || !q || detBusy) return;
+  if (!detMyTurn()) return toast(`지금은 ${detName(detTurnId())} 차례예요`);
   const old = D.asked.get(detNorm(q));
   if (old) {
     $('#detQ').value = '';
     return toast(`이미 나온 질문이에요: ${DET_A[old]}`);
   }
   detBusy = true;
+  renderDet();
   try {
     const j = await detCall({ op: 'ask', caseId: D.caseId, q });
     if (det !== D) return;
     if (j.a === 'invalid') return toast('예 / 아니오로 답할 수 있게 물어봐 주세요');
     $('#detQ').value = '';
     send('det', { e: 'qa', id: D.id, q, a: j.a });
-    detQa(me, q, j.a);
+    detQa(MY_ID, q, j.a);
   } catch (err) {
     detErr(err);
   } finally {
     detBusy = false;
+    renderDet();
   }
 };
 
-function detQa(p, q, a) {
+function detQa(by, q, a) {
   const D = det;
   if (!D || D.over || !DET_A[a]) return;
-  if (D.asked.has(detNorm(q))) return;
-  D.asked.set(detNorm(q), a);
-  D.q++;
-  D.log.push({ t: 'qa', who: p === me ? myName || '나' : p.name, q, a });
-  if (p) say(p, q, 2.4);
+  if (!D.asked.has(detNorm(q))) {
+    D.asked.set(detNorm(q), a);
+    D.q++;
+    D.log.push({ t: 'qa', who: detName(by), q, a });
+    const p = personById(by);
+    if (p) say(p, q, 2.4);
+  }
+  detNext(by);
   renderDet();
 }
 
-// 추리 제출. 핵심을 다 맞히면 해결
+// 추리 제출. 내 차례에만. 맞힌 '밝혀낼 것'은 쌓이고 다 밝혀내면 해결
 $('#detSolve').onsubmit = async (e) => {
   e.preventDefault();
   const D = det;
   const g = $('#detG').value.trim().slice(0, 200);
   if (!D || D.over || g.length < 4 || detBusy) return;
+  if (!detMyTurn()) return toast(`지금은 ${detName(detTurnId())} 차례예요`);
   detBusy = true;
+  renderDet();
   try {
-    const j = await detCall({ op: 'solve', caseId: D.caseId, g });
+    const j = await detCall({ op: 'solve', caseId: D.caseId, g, found: D.found });
     if (det !== D) return;
     $('#detG').value = '';
-    const r = { e: 'guess', id: D.id, g, ok: !!j.ok, hits: j.hits | 0, total: j.total | 0, comment: j.comment || '', truth: j.truth || '' };
+    const r = { e: 'guess', id: D.id, g, ok: !!j.ok, hitsArr: Array.isArray(j.hitsArr) ? j.hitsArr.map(Boolean) : [], comment: j.comment || '', truth: j.truth || '' };
     send('det', r);
-    detGuess(me, r);
+    detGuess(MY_ID, r);
   } catch (err) {
     detErr(err);
   } finally {
     detBusy = false;
+    renderDet();
   }
 };
 
-function detGuess(p, r) {
+function detGuess(by, r) {
   const D = det;
   if (!D || D.over) return;
   D.tries++;
-  D.log.push({ t: 'g', who: p === me ? myName || '나' : p.name, g: String(r.g).slice(0, 200), ok: r.ok, hits: r.hits, total: r.total, comment: String(r.comment || '').slice(0, 60) });
-  if (p) say(p, r.ok ? '범인은... 바로!' : '내 추리는...', 1.8);
+  const hitsArr = (r.hitsArr || []).slice(0, D.goals.length).map(Boolean);
+  const fresh = hitsArr.filter((h, i) => h && !D.found[i]).length;
+  hitsArr.forEach((h, i) => h && (D.found[i] = true));
+  D.log.push({ t: 'g', who: detName(by), g: String(r.g).slice(0, 200), ok: !!r.ok, hits: hitsArr.filter(Boolean).length, total: D.goals.length, fresh, comment: String(r.comment || '').slice(0, 60) });
+  const p = personById(by);
+  if (p) say(p, r.ok ? '진상은... 바로 이거야!' : '내 추리는...', 1.8);
   if (r.ok) {
     D.over = true;
-    D.truth = String(r.truth || '').slice(0, 600);
-    D.solver = p === me ? myName || '나' : p.name;
+    D.truth = String(r.truth || '').slice(0, 800);
+    D.solver = detName(by);
     if (p) {
       later(1.6, () => say(p, '사건 해결!', 2.4, true));
       W.sparkle(p.headWorld(new THREE.Vector3()));
     }
     if (me.bz === 'B4') sound.yeah();
-  }
+  } else detNext(by);
+  renderDet();
+}
+
+// 차례 넘기기(내 차례에만, 또는 오래 안 넘어갈 때 연 사람이)
+$('#detSkip').onclick = () => {
+  const D = det;
+  if (!D || D.over || !detMyTurn()) return;
+  send('det', { e: 'skip', id: D.id, by: MY_ID });
+  detSkip(MY_ID);
+};
+
+function detSkip(by) {
+  const D = det;
+  if (!D || D.over || detTurnId() !== by) return;
+  D.log.push({ t: 's', who: detName(by) });
+  detNext(by);
   renderDet();
 }
 
@@ -5688,7 +5755,7 @@ function detReveal(truth) {
   if (!D || D.over) return;
   D.over = true;
   D.gaveUp = true;
-  D.truth = String(truth || '').slice(0, 600);
+  D.truth = String(truth || '').slice(0, 800);
   renderDet();
 }
 
@@ -5697,27 +5764,48 @@ $('#detEnd').onclick = () => {
   send('det', { e: 'end', id: det.id });
   endDet();
 };
+$('#detMini').onclick = () => {
+  const mini = $('#det').classList.toggle('mini');
+  $('#detMini').textContent = mini ? '펼치기' : '접기';
+};
 
-function onDetNet(d, p) {
+function onDetNet(d, p, from) {
   if (d.e === 'start') {
     if (det && !det.over) return;
     if (typeof d.caseId !== 'string' || typeof d.id !== 'string') return;
-    return startDet({ id: d.id, caseId: d.caseId, title: d.title || '', setup: d.setup || '' }, p);
+    return startDet({ id: d.id, caseId: d.caseId, title: d.title || '', setup: d.setup || '', goals: Array.isArray(d.goals) ? d.goals : [], order: Array.isArray(d.order) ? d.order : [from] }, from);
   }
   if (!det || d.id !== det.id) return;
-  if (d.e === 'qa') detQa(p, String(d.q || '').slice(0, 80), d.a);
-  else if (d.e === 'guess') detGuess(p, d);
+  if (d.e === 'join') {
+    if (!det.order.includes(from)) det.order.push(from);
+    renderDet();
+  } else if (d.e === 'qa') detQa(from, String(d.q || '').slice(0, 80), d.a);
+  else if (d.e === 'guess') detGuess(from, d);
+  else if (d.e === 'skip') detSkip(typeof d.by === 'string' && from === det.host ? d.by : from);
   else if (d.e === 'reveal') detReveal(d.truth);
   else if (d.e === 'end') endDet();
+}
+
+// 질문 수로 매기는 칭호
+function detRank(q) {
+  return q <= 10 ? '명탐정' : q <= 20 ? '베테랑 형사' : q <= 35 ? '신입 형사' : '견습 탐정';
 }
 
 function renderDet() {
   const D = det;
   const show = !!D && inMeetSeat(me);
   if ($('#det').hidden === show) $('#det').hidden = !show;
-  if (!D) return;
+  if (!D || !show) return;
   $('#detTitle').textContent = '탐정단 · ' + D.title;
   $('#detSetup').textContent = D.setup;
+  const gl = $('#detGoals');
+  gl.innerHTML = '';
+  D.goals.forEach((g, i) => {
+    const li = document.createElement('li');
+    li.textContent = g;
+    if (D.found[i]) li.className = 'done';
+    gl.appendChild(li);
+  });
   const box = $('#detLog');
   box.innerHTML = '';
   for (const L of D.log) {
@@ -5728,21 +5816,59 @@ function renderDet() {
       b.className = L.a === 'yes' ? 'y' : L.a === 'no' ? 'n' : 'i';
       b.textContent = DET_A[L.a];
       el.appendChild(b);
+    } else if (L.t === 's') {
+      el.className = 's';
+      el.textContent = `${L.who} 차례 넘김`;
     } else {
       el.className = 'g';
-      el.textContent = `${L.who}의 추리: ${L.g} → ${L.ok ? '정답!' : `땡 (${L.hits}/${L.total})`}${L.comment && !L.ok ? ' · ' + L.comment : ''}`;
+      const res = L.ok ? '정답!' : L.fresh ? `새로 ${L.fresh}개 밝혀냄` : '새로 밝혀낸 건 없어요';
+      el.textContent = `${L.who}의 추리: ${L.g} → ${res}${L.comment && !L.ok ? ' · ' + L.comment : ''}`;
     }
     box.appendChild(el);
   }
   if (D.over) {
     const t = document.createElement('div');
     t.className = 'truth';
-    t.textContent = (D.gaveUp ? '진상: ' : `${D.solver} 해결! 진상: `) + D.truth;
+    t.textContent = (D.gaveUp ? '진상: ' : `${D.solver} 해결! (${detRank(D.q)}) 진상: `) + D.truth;
     box.appendChild(t);
   }
   box.scrollTop = box.scrollHeight;
-  $('#detStat').textContent = `질문 ${D.q}번 · 추리 ${D.tries}번` + (D.over && !D.gaveUp ? ' 만에 해결' : '');
-  for (const id of ['#detAsk', '#detSolve', '#detGive']) $(id).hidden = D.over;
+  const nFound = D.found.filter(Boolean).length;
+  $('#detStat').textContent = `질문 ${D.q}번 · 추리 ${D.tries}번 · 밝혀낸 것 ${nFound}/${D.goals.length}` + (D.over && !D.gaveUp ? ' · 해결' : '');
+  const my = detMyTurn();
+  const tEl = $('#detTurn');
+  tEl.classList.toggle('my', my);
+  tEl.textContent = D.over ? '' : detBusy ? '기록관이 기록을 뒤지는 중...' : my ? '내 차례예요! 질문하거나 추리를 제출하세요' : `${detName(detTurnId())} 차례예요`;
+  for (const id of ['#detQ', '#detG']) $(id).disabled = !my || detBusy;
+  for (const id of ['#detAsk', '#detSolve', '#detSkip', '#detGive']) $(id).hidden = D.over;
+  $('#detSkip').hidden = D.over || !my;
+}
+
+// 늦게 회의실 의자에 앉으면 탐정으로 끼고, 나간 사람은 빼고, 오래 안 넘어가는 차례는 연 사람이 넘긴다
+function detUpdate() {
+  const D = det;
+  if (!D || D.over) return;
+  if (inMeetSeat(me) && !D.order.includes(MY_ID)) {
+    D.order.push(MY_ID);
+    send('det', { e: 'join', id: D.id });
+    renderDet();
+  }
+  for (const id of D.order.slice()) {
+    if (id === MY_ID || personById(id)) continue;
+    const cur = detTurnId();
+    D.order.splice(D.order.indexOf(id), 1);
+    if (!D.order.length) return endDet();
+    D.turn = cur === id ? D.turn % D.order.length : Math.max(0, D.order.indexOf(cur));
+    renderDet();
+  }
+  if (D.host !== MY_ID) return;
+  const cur = detTurnId();
+  const p = personById(cur);
+  const away = !p || !inMeetSeat(p);
+  if (cur && cur !== MY_ID && (simT - D.turnAt > DET_TURN_SEC || (away && simT - D.turnAt > 5))) {
+    send('det', { e: 'skip', id: D.id, by: cur });
+    detSkip(cur);
+  }
 }
 
 // ---------- 테라스에서 소리지르기 ----------
@@ -6500,9 +6626,12 @@ const SMOKE_HD = { x: -9.15, z: -4.1 };
 const SMOKE_P = { x: -10.05, z: -4.1 };
 const SMOKE_SEC = 13;
 const SMOKE_TALK = ['끅... 담배는 역시 테라스지~', '재무팀 숫자가 자꾸 두 개로 보여...', '이거 피우고 한 잔 하러 갈까?', '대표님한텐 비밀이다~'];
-// 얼차려는 정해진 곳 없이 부른 사람 앞(0.9m, 희동이 쪽)으로 희동이가 온다
+// 얼차려는 정해진 곳 없이 부른 사람 앞으로 희동이가 온다
+// 부른 사람 둘레 0.9~1.3m 에서 책상 너머가 아니고 가구에 붙지 않은 빈자리 중 희동이 쪽에 가까운 곳. 없으면 희동이 쪽 0.9m
 const DRILL_GAP = 0.9;
 const drillSpot = (p, t) => {
+  const s = p.bz && BLD.spotNear(p.bz, p.pos, t.pos);
+  if (s) return s;
   let dx = t.pos.x - p.pos.x;
   let dz = t.pos.z - p.pos.z;
   const d = Math.hypot(dx, dz);
@@ -6612,7 +6741,7 @@ function hdEvUpdate(dt) {
     }
     if (tHere && pHere) {
       t.targetYaw = Math.atan2(p.pos.x - t.pos.x, p.pos.z - t.pos.z);
-      p.targetYaw = Math.atan2(t.pos.x - p.pos.x, t.pos.z - p.pos.z);
+      if (p.state !== 'sit') p.targetYaw = Math.atan2(t.pos.x - p.pos.x, t.pos.z - p.pos.z);
       E.n = 0;
       if (E.k === 'smoke') {
         stopCig(p);
@@ -6922,6 +7051,7 @@ function tick(dt) {
   mtgUpdate();
   hdEvUpdate(dt);
   bingoUpdate();
+  detUpdate();
   bldTriggers();
   workerTick(dt);
   W.update(dt, t);

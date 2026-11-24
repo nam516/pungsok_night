@@ -47,7 +47,11 @@ async function handler(req, res) {
   if (req.method !== 'POST') return send(res, 405, { error: 'POST only' });
   const b = await readBody(req);
   const op = b.op;
-  if (op === 'list') return send(res, 200, { cases: CASES.map((c) => ({ id: c.id, title: c.title, level: c.level, setup: c.setup })), ready: !!process.env.GEMINI_API_KEY });
+  if (op === 'list') {
+    const order = { 쉬움: 0, 보통: 1, 어려움: 2 };
+    const list = CASES.map((c) => ({ id: c.id, title: c.title, level: c.level, setup: c.setup, goals: c.goals })).sort((a, b) => order[a.level] - order[b.level]);
+    return send(res, 200, { cases: list, ready: !!process.env.GEMINI_API_KEY });
+  }
   const c = CASES.find((x) => x.id === b.caseId);
   if (!c) return send(res, 404, { error: 'no-case' });
   try {
@@ -66,9 +70,12 @@ async function handler(req, res) {
       if (g.length < 4) return send(res, 400, { error: 'short' });
       const j = parseJson(await gemini(solvePrompt(c, g)));
       const hits = c.keys.map((_, i) => !!(j && Array.isArray(j.hits) && j.hits[i] === true));
-      const ok = hits.every(Boolean);
+      // 앞서 맞힌 것(found)과 합쳐서 다 밝혀졌으면 해결
+      const found = Array.isArray(b.found) ? b.found : [];
+      const all = hits.map((h, i) => h || found[i] === true);
+      const ok = all.every(Boolean);
       const comment = j && typeof j.comment === 'string' ? j.comment.slice(0, 60) : '';
-      return send(res, 200, { ok, hits: hits.filter(Boolean).length, total: hits.length, comment, truth: ok ? c.truth : undefined });
+      return send(res, 200, { ok, hitsArr: hits, hits: hits.filter(Boolean).length, total: hits.length, comment, truth: ok ? c.truth : undefined });
     }
     if (op === 'reveal') return send(res, 200, { truth: c.truth });
     return send(res, 400, { error: 'op' });

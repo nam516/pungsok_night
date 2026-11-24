@@ -104,25 +104,43 @@
   #bgGrid button.line { background: #d94f4f; border-color: #ff8a8a; }
   #bgGrid button:disabled { cursor: default; }
   #bgLast { font-size: 12px; opacity: 0.7; margin-top: 8px; min-height: 16px; }
+  #detSheet { width: min(560px, calc(100vw - 24px)); }
   #detList { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
   #detList button { text-align: left; background: rgba(255, 220, 170, 0.08); border: 1px solid rgba(255, 220, 170, 0.16); border-radius: 12px; padding: 10px; font-size: 14px; }
   #detList small { display: block; opacity: 0.65; font-size: 12px; margin-top: 3px; }
-  #det { position: fixed; z-index: 7; right: 10px; top: 64px; border-radius: 18px; padding: 10px; width: min(340px, calc(100vw - 20px)); max-height: calc(100vh - 200px); max-height: calc(100dvh - 200px); display: flex; flex-direction: column; gap: 6px; }
+  #det { position: fixed; z-index: 7; left: 50%; top: 64px; transform: translateX(-50%); border-radius: 18px; padding: 14px 16px; width: min(780px, calc(100vw - 16px)); max-height: calc(100vh - 180px); max-height: calc(100dvh - 180px); display: flex; flex-direction: column; gap: 8px; background: rgba(16, 20, 16, 0.86); }
   #det[hidden] { display: none !important; }
-  #detHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
-  #detHead b { color: var(--warm); font-weight: 500; }
-  #detSetup { font-size: 13px; line-height: 1.5; opacity: 0.92; max-height: 22vh; overflow-y: auto; }
-  #detLog { font-size: 13px; line-height: 1.45; overflow-y: auto; flex: 1; min-height: 40px; border-top: 1px solid rgba(255, 220, 170, 0.12); padding-top: 6px; }
-  #detLog div { margin-bottom: 3px; }
+  #det.mini { width: min(360px, calc(100vw - 16px)); }
+  #det.mini #detBody { display: none; }
+  #detHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 16px; }
+  #detHead b { color: var(--warm); font-weight: 600; }
+  #detBody { display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; min-height: 0; overflow: hidden; }
+  #detFile, #detTalk { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  #detFile { overflow-y: auto; }
+  .detLabel { font-size: 12px; letter-spacing: 0.04em; color: var(--warm); opacity: 0.85; margin-top: 2px; }
+  #detSetup { font-size: 15px; line-height: 1.6; }
+  #detGoals { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.7; }
+  #detGoals li.done { color: #8fe3a0; }
+  #detGoals li.done::after { content: ' ✓'; }
+  #detStat { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+  #detLog { font-size: 14px; line-height: 1.5; overflow-y: auto; flex: 1; min-height: 120px; max-height: 40vh; background: rgba(255, 255, 255, 0.04); border-radius: 12px; padding: 8px 10px; }
+  #detLog div { margin-bottom: 4px; }
   #detLog .y { color: #8fe3a0; }
   #detLog .n { color: #ff9a8a; }
   #detLog .i { color: #c9c3b8; }
   #detLog .g { color: var(--warm); }
-  #detLog .truth { background: rgba(255, 220, 170, 0.1); border-radius: 10px; padding: 8px; margin-top: 6px; }
-  #detStat { font-size: 12px; opacity: 0.75; }
+  #detLog .s { opacity: 0.6; font-size: 13px; }
+  #detLog .truth { background: rgba(255, 220, 170, 0.12); border-radius: 10px; padding: 10px; margin-top: 6px; line-height: 1.6; }
+  #detTurn { font-size: 14px; min-height: 20px; }
+  #detTurn.my { color: var(--warm); font-weight: 600; }
   .detRow { display: flex; gap: 6px; }
-  .detRow input { flex: 1; min-width: 0; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 220, 170, 0.25); border-radius: 10px; padding: 7px 9px; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
-  #detGive { align-self: flex-start; opacity: 0.8; }
+  .detRow input { flex: 1; min-width: 0; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 220, 170, 0.25); border-radius: 10px; padding: 8px 10px; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
+  .detRow input:disabled { opacity: 0.45; }
+  @media (max-width: 640px) {
+    #detBody { grid-template-columns: 1fr; overflow-y: auto; }
+    #detSetup { font-size: 14px; }
+    #detLog { max-height: 28vh; }
+  }
   .grid button { background: rgba(255, 220, 170, 0.08); border: 1px solid rgba(255, 220, 170, 0.16); border-radius: 14px; padding: 12px 8px; font-size: 14px; }
   .grid.grid3 { grid-template-columns: 1fr 1fr 1fr; }
   .sheet { max-height: calc(100vh - 140px); overflow-y: auto; }
@@ -450,13 +468,24 @@
 </div>
 
 <div id="det" class="pill" hidden>
-  <div id="detHead"><b id="detTitle"></b><button id="detEnd" class="mini">그만하기</button></div>
-  <div id="detSetup"></div>
-  <div id="detLog"></div>
-  <div id="detStat"></div>
-  <form id="detAsk" class="detRow"><input id="detQ" maxlength="80" placeholder="예/아니오로 답할 질문" autocomplete="off" enterkeyhint="send"><button type="submit" class="mini">질문</button></form>
-  <form id="detSolve" class="detRow"><input id="detG" maxlength="200" placeholder="진상 추리 (누가, 어떻게, 왜)" autocomplete="off" enterkeyhint="send"><button type="submit" class="mini">추리 제출</button></form>
-  <button id="detGive" class="mini">포기하고 진상 보기</button>
+  <div id="detHead"><b id="detTitle"></b><span><button id="detMini" class="mini">접기</button> <button id="detEnd" class="mini">그만하기</button></span></div>
+  <div id="detBody">
+    <div id="detFile">
+      <div class="detLabel">사건 개요</div>
+      <div id="detSetup"></div>
+      <div class="detLabel">밝혀낼 것</div>
+      <ol id="detGoals"></ol>
+      <div id="detStat"></div>
+    </div>
+    <div id="detTalk">
+      <div class="detLabel">심문 기록</div>
+      <div id="detLog"></div>
+      <div id="detTurn"></div>
+      <form id="detAsk" class="detRow"><input id="detQ" maxlength="80" placeholder="예/아니오로 답할 질문" autocomplete="off" enterkeyhint="send"><button type="submit" class="mini">질문</button></form>
+      <form id="detSolve" class="detRow"><input id="detG" maxlength="200" placeholder="추리 제출: 밝혀낸 것을 적어요" autocomplete="off" enterkeyhint="send"><button type="submit" class="mini">추리 제출</button></form>
+      <div class="detRow"><button id="detSkip" class="mini">차례 넘기기</button><button id="detGive" class="mini">포기하고 진상 보기</button></div>
+    </div>
+  </div>
 </div>
 
 <div id="bingo" class="pill" hidden>
