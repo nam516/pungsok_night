@@ -3200,6 +3200,7 @@ function onNet(m) {
     if (d.e === 'start') startMtg(p, Array.isArray(d.ids) ? d.ids.map(String) : []);
     else if (d.e === 'think') mtgThink(String(d.who || p.name || '').slice(0, 12), String(d.q || '').slice(0, 40));
     else if (d.e === 'say' && typeof d.t === 'string') mtgSay(d.t, !!d.hard);
+    else if (d.e === 'hit' && p.bz === 'B4') mtgHit(p, d.k === 'ps' ? 'ps' : 't', d.i | 0);
     else if (d.e === 'end') endMtg('...다음부턴 정리해서 오세요.');
   } else if (m.t === 'det') {
     onDetNet(d, p, m.f);
@@ -4973,7 +4974,11 @@ function officeUpdate() {
   showBtn('#bChat', onFloor && !napping);
   showBtn('#bWork', !!me.officeSeat && !napping);
   showBtn('#bDoze', !!me.officeSeat && !napping);
-  showBtn('#bKnock', me.bz === 'B4' && !napping);
+  // 회의실 의자에서 회의 중이면 풍순이 꿀밤 대신 쥐어박기
+  const hitOn = !!mtg && mtg.phase === 'on' && inMeetSeat(me) && !napping;
+  showBtn('#bKnock', me.bz === 'B4' && !napping && !hitOn);
+  showBtn('#bHit', hitOn);
+  if (!hitOn && $('#hitSheet').classList.contains('show')) $('#hitSheet').classList.remove('show');
   showBtn('#bNap', me.bz === 'B4');
   showBtn('#bOy', me.bz === 'B4' && !napping);
   showBtn('#bMtg', me.bz === 'B4' && !napping && !(mtg && mtg.phase === 'back'));
@@ -6364,20 +6369,21 @@ function mtgAgenda(text) {
       later(1.6, () => mtgAgenda(nx));
     }
   };
-  mtgAsk(q, who, M.hist.slice(-5, -1))
-    .then((j) => done(j.r, !!j.hard))
+  const meek = mtgCowed(M);
+  mtgAsk(q, who, M.hist.slice(-5, -1), meek)
+    .then((j) => done(j.r, !meek && !!j.hard))
     .catch(() => {
-      const f = mtgFallback(q);
+      const f = meek ? { t: MTG_MEEK[Math.max(0, MTG_MEEK_N - M.meekLeft) % MTG_MEEK.length], hard: false } : mtgFallback(q);
       done(f.t, f.hard);
     });
 }
 
 // 서버(Gemini)에 팀장 대답을 묻는다. 8초 넘으면 포기
-async function mtgAsk(said, who, history) {
+async function mtgAsk(said, who, history, meek = false) {
   const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const tm = ac && setTimeout(() => ac.abort(), 8000);
   try {
-    const r = await fetch('/api/meeting', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ said, who, history }), signal: ac ? ac.signal : undefined });
+    const r = await fetch('/api/meeting', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ said, who, history, meek }), signal: ac ? ac.signal : undefined });
     const j = await r.json();
     if (!r.ok || !j || typeof j.r !== 'string' || !j.r.trim()) throw new Error('fail');
     return { r: j.r.trim().slice(0, 60), hard: !!j.hard };
@@ -6413,7 +6419,16 @@ function mtgSay(text, hard) {
   M.n++;
   M.hist.push({ who: '풍뎅이', t });
   if (M.hist.length > 8) M.hist.shift();
-  if (hard) {
+  if (mtgCowed(M)) {
+    M.t.faceMood = 'meek';
+    say(M.t, t, 3.2);
+    // 정해진 만큼 말 잘 듣는 척하고 나면 다시 거만해진다
+    if (--M.meekLeft <= 0) {
+      M.cowedUntil = 0;
+      // 화면마다 같은 대사가 나오게 회의 대답 수로 고른다
+      later(3.4, () => mtgUncow(M, MTG_UNCOW[M.n % MTG_UNCOW.length]));
+    }
+  } else if (hard) {
     // 곤란하면 식은땀 흘리며 넘긴다
     M.t.faceMood = 'annoyed';
     say(M.t, t, 3.2);
@@ -6446,6 +6461,209 @@ function endMtg(line) {
   }
 }
 
+// ---------- 회의 중 쥐어박기 ----------
+// 회의실 의자에 앉아 '쥐어박기' → 풍뎅이나 풍순이를 골라 앉은 채로 회의 자료를 구겨 던져 머리를 딱
+// 풍뎅이는 세 대째에 주눅 들어 몇 마디는 말 잘 듣는 척하다가 다시 재수 없게 돌아온다. 풍순이는 세 대째에 팀장한테 이르고 삐진다
+// 신호 mtg{e:'hit', k:'t'|'ps', i}
+// 주눅 들어 공손하게 대답하는 횟수. 아무도 말을 안 걸면 90초 뒤 저절로 풀린다
+const MTG_MEEK_N = 3;
+const MTG_COWED_MAX = 90;
+const MTG_UNCOW = ['...흠흠. 근데 다시 생각해 보니까요~', '...아 근데, 제가 왜 사과했죠?', '...자, 장난은 여기까지 하고요~'];
+const HIT_LINE = { t: ['주댕이를 그냥!', '비꼬지 좀 마요!', '팀장이면 다예요?!'], ps: ['회의 똑바로 들어!', '너 또 졸았지!', '너 또 실수했잖아!'] };
+const HIT_T = ['...방금 뭐 하신 거죠?', '와... 회의 중에 이러시는 거예요? 신기하네~'];
+const HIT_T_COWED = '말대꾸 해서 죄송합니다...';
+const HIT_PS = ['아얏! 녜에..', '흐엉... 왜 저만 때려요...'];
+const MTG_MEEK = ['네... 좋은 의견이신 것 같습니다...', '...바로 알아보겠습니다...', '아, 네... 말씀하신 대로 하겠습니다...', '...제가 생각이 짧았습니다...'];
+let hitAt = -99;
+const mtgCowed = (M) => !!M && M.cowedUntil > simT;
+
+$('#bHit').onclick = () => {
+  if (blocked() || !mtg || mtg.phase !== 'on' || !inMeetSeat(me)) return;
+  $('#hitSheet').classList.add('show');
+};
+$('#hitClose').onclick = () => $('#hitSheet').classList.remove('show');
+document.querySelectorAll('[data-hit]').forEach(
+  (b) =>
+    (b.onclick = () => {
+      $('#hitSheet').classList.remove('show');
+      myMtgHit(b.dataset.hit === 'ps' ? 'ps' : 't');
+    })
+);
+
+function myMtgHit(k) {
+  const M = mtg;
+  if (!M || M.phase !== 'on' || !inMeetSeat(me) || simT - hitAt < 2.5) return;
+  if (M[k].state !== 'sit') return toast(k === 't' ? '팀장님이 아직 안 앉았어요' : '풍순이가 아직 안 앉았어요');
+  hitAt = simT;
+  const i = (Math.random() * 10) | 0;
+  send('mtg', { e: 'hit', k, i });
+  mtgHit(me, k, i, myName || '나');
+}
+
+function mtgHit(p, k, i, nm) {
+  const M = mtg;
+  if (!M || M.phase !== 'on') return;
+  const w = M[k];
+  // 연달아 때린 수. 40초 넘게 쉬면 처음부터
+  M.hit = M.hit || { t: 0, ps: 0 };
+  M.hitAt = M.hitAt || { t: -99, ps: -99 };
+  if (simT - M.hitAt[k] > 40 && !(k === 't' && mtgCowed(M))) M.hit[k] = 0;
+  M.hitAt[k] = simT;
+  const n = ++M.hit[k];
+  M.idleAt = simT;
+  M.hist.push({ who: '(상황)', t: `${nm || p.name || '팀원'}님이 ${k === 't' ? '팀장 풍뎅이' : '풍순이'} 머리를 쥐어박음` });
+  if (M.hist.length > 8) M.hist.shift();
+
+  p.action = null;
+  p.do('toss');
+  const L = HIT_LINE[k];
+  say(p, L[i % L.length], 1.4, true);
+  // 팔을 휘두르는 순간 손에서 떠난다
+  later(0.45, () => {
+    if (mtg !== M) return;
+    const from = p.headWorld(new THREE.Vector3());
+    from.y -= 0.25;
+    const g = new THREE.Mesh(paperBallGeo, paperBallM);
+    g.position.copy(from);
+    scene.add(g);
+    paperBalls.push({ g, from, w, k: 0, onHit: () => mtgHitLand(M, k, n, w) });
+  });
+}
+
+// 머리에 맞은 순간
+function mtgHitLand(M, k, n, w) {
+  if (mtg !== M) return;
+  sound.knock();
+  W.sparkle(w.headWorld(new THREE.Vector3()));
+  w.action = null;
+  w.do('ouch');
+  w.setBump(true);
+  const b = (w.bumpN = (w.bumpN | 0) + 1);
+  later(8, () => w.bumpN === b && w.setBump(false));
+  later(0.9, () => {
+    if (mtg !== M || M.phase !== 'on') return;
+    if (k === 't') hitLeadReact(M, n);
+    else hitPsReact(M, n);
+  });
+}
+
+// 구긴 종이 뭉치. 포물선으로 날아가 머리에 맞고 튕겨 바닥에 떨어졌다가 사라진다
+const paperBallGeo = (() => {
+  const g = new THREE.IcosahedronGeometry(0.095, 1);
+  const a = g.attributes.position;
+  for (let n = 0; n < a.count; n++) {
+    // 같은 꼭짓점은 같은 값이 되게 위치로 흔든다(틈이 안 생기게)
+    const h = Math.sin(a.getX(n) * 129.9 + a.getY(n) * 782.3 + a.getZ(n) * 377.1) * 43758.5453;
+    const f = 0.8 + (h - Math.floor(h)) * 0.4;
+    a.setXYZ(n, a.getX(n) * f, a.getY(n) * f, a.getZ(n) * f);
+  }
+  g.computeVertexNormals();
+  return g;
+})();
+// 그늘에서도 잘 보이게 살짝 밝힌다
+const paperBallM = new THREE.MeshStandardMaterial({ color: 0xf6f4ee, roughness: 0.9, emissive: 0x555550, flatShading: true });
+const paperBalls = [];
+const _pbTo = new THREE.Vector3();
+function paperBallUpdate(dt) {
+  for (let n = paperBalls.length - 1; n >= 0; n--) {
+    const B = paperBalls[n];
+    const g = B.g;
+    if (!B.v) {
+      // 날아가는 중. 맞을 사람 머리를 따라간다
+      B.k = Math.min(1, B.k + dt / 0.5);
+      const to = B.w.headWorld(_pbTo);
+      to.y -= 0.12;
+      g.position.lerpVectors(B.from, to, B.k);
+      g.position.y += Math.sin(B.k * Math.PI) * 0.45;
+      g.rotation.x += dt * 11;
+      g.rotation.z += dt * 7;
+      if (B.k < 1) continue;
+      B.onHit();
+      // 날아온 방향으로 튕겨 나간다
+      const dx = to.x - B.from.x, dz = to.z - B.from.z;
+      const d = Math.hypot(dx, dz) || 1;
+      B.v = new THREE.Vector3((dx / d) * 0.8, 1.4, (dz / d) * 0.8);
+      B.life = 5;
+      continue;
+    }
+    B.life -= dt;
+    if (g.position.y > 0.05) {
+      B.v.y -= dt * 6;
+      g.position.addScaledVector(B.v, dt);
+      g.rotation.x += dt * 8;
+      if (g.position.y <= 0.05) {
+        g.position.y = 0.05;
+        B.v.set(B.v.x * 0.3, 0, B.v.z * 0.3);
+      }
+    } else {
+      // 바닥에서 조금 구르다 멈춘다
+      B.v.multiplyScalar(1 - Math.min(1, dt * 3));
+      g.position.addScaledVector(B.v, dt);
+    }
+    if (B.life <= 0) {
+      scene.remove(g);
+      paperBalls.splice(n, 1);
+    }
+  }
+}
+
+function hitLeadReact(M, n) {
+  const t = M.t;
+  if (n >= 3 || mtgCowed(M)) {
+    // 주눅 들어 고개 숙이고 손은 무릎에
+    const first = !mtgCowed(M);
+    M.cowedUntil = simT + MTG_COWED_MAX;
+    M.meekLeft = MTG_MEEK_N;
+    t.idlePose = 'cower';
+    t.faceMood = 'meek';
+    say(t, first ? HIT_T_COWED : '...죄송합니다...', 2.8);
+    if (first) later(2.4, () => mtg === M && say(M.ps, '(팀장님이... 사과를...?)', 2.2));
+    return;
+  }
+  if (n === 1) {
+    t.faceMood = 'annoyed';
+    say(t, HIT_T[0], 2.4);
+    later(3, () => mtg === M && !mtgCowed(M) && t.faceMood === 'annoyed' && (t.faceMood = 'smirk'));
+  } else {
+    t.faceMood = 'smirk';
+    say(t, HIT_T[1], 2.6);
+  }
+}
+
+// 주눅이 풀려 다시 팔짱 끼고 게슴츠레
+function mtgUncow(M, line) {
+  if (mtg !== M || M.phase !== 'on' || mtgCowed(M)) return;
+  M.cowedUntil = 0;
+  if (M.hit) M.hit.t = 0;
+  M.t.idlePose = 'smug';
+  M.t.faceMood = 'smirk';
+  say(M.t, line, 2.6);
+}
+
+function hitPsReact(M, n) {
+  const w = M.ps;
+  if (n < 3) {
+    w.faceMood = 'sad';
+    say(w, HIT_PS[n - 1], 2.2);
+    later(4, () => mtg === M && w.faceMood === 'sad' && !(w.sulkUntil > simT) && (w.faceMood = null));
+    return;
+  }
+  // 세 대째엔 울면서 팀장한테 이르고 한동안 삐진다
+  M.hit.ps = 0;
+  w.faceMood = 'sad';
+  say(w, '흐엉~ 팀장님~ 저 사람이 자꾸 때려요!!', 2.6, true);
+  later(2.2, () => {
+    if (mtg !== M || M.phase !== 'on') return;
+    if (mtgCowed(M)) say(M.t, '...저도 맞았어요...', 2.4);
+    else say(M.t, MTG_BLOG, 2.4);
+  });
+  w.sulkUntil = simT + 60;
+  later(3, () => w.sulkUntil > simT && (w.faceMood = 'pout'));
+  later(60, () => {
+    if (w.sulkUntil <= simT && w.faceMood === 'pout') w.faceMood = null;
+  });
+}
+
 function mtgUpdate() {
   const M = mtg;
   if (!M) return;
@@ -6473,6 +6691,10 @@ function mtgUpdate() {
       say(M.t, '...자, 안건 말해 봐요.', 2.4);
     }
   } else if (M.phase === 'on') {
+    if (M.cowedUntil && simT > M.cowedUntil) {
+      M.cowedUntil = 0;
+      mtgUncow(M, '...흠흠. 자, 계속하죠.');
+    }
     // 너무 길어지거나 회의실에 아무도 없으면 끝
     const anyone = people.some((q) => !q.worker && q.bz === 'B4' && inMeetSeat(q));
     if (anyone) M.emptyAt = 0;
@@ -6481,7 +6703,7 @@ function mtgUpdate() {
     else if (M.emptyAt && simT - M.emptyAt > MTG_IDLE_SEC) endMtg('...다들 어디 갔어? 회의 끝.');
     else if (simT - M.idleAt > 30) {
       M.idleAt = simT;
-      say(M.t, '...안건 없어요? 없으면 끝낼까요?', 2.6);
+      say(M.t, mtgCowed(M) ? '...저, 혹시 안건 있으실까요...?' : '...안건 없어요? 없으면 끝낼까요?', 2.6);
     }
   } else if (M.phase === 'back') {
     // 자기 자리로 돌아가 앉는다. 팀장은 다시 반쯤 눕는다
@@ -7042,6 +7264,7 @@ function tick(dt) {
   BLD.update(dt);
   officeUpdate();
   paperUpdate(dt);
+  paperBallUpdate(dt);
   meetUpdate();
   coffeeRunUpdate();
   knockRunUpdate();

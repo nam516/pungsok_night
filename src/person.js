@@ -103,6 +103,7 @@ function faceTexture(mood, blush, makeup = null) {
     else if (mood === 'fury') (inY = 112), (outY = 86), (mid = 102);
     else if (mood === 'annoyed') x === RX ? ((inY = 94), (outY = 92), (mid = 88)) : ((inY = 104), (outY = 101), (mid = 100));
     else if (mood === 'sad') (inY = 92), (outY = 104), (mid = 98);
+    else if (mood === 'meek') (inY = 86), (outY = 108), (mid = 94);
     else if (mood === 'pout') (inY = 104), (outY = 98), (mid = 100);
     else if (mood === 'serious') (inY = 103), (outY = 100), (mid = 101);
     else if (mood === 'smirk') x === RX ? ((inY = 92), (outY = 94), (mid = 86)) : ((inY = 106), (outY = 104), (mid = 104));
@@ -135,6 +136,18 @@ function faceTexture(mood, blush, makeup = null) {
     for (const x of [LX, RX]) roundEye(x, 9, 12, 3);
   } else if (mood === 'sad') {
     for (const x of [LX, RX]) roundEye(x, 11, 14, 3);
+  } else if (mood === 'meek') {
+    // 주눅 든 눈. 작게 뜨고 아래를 본다
+    for (const x of [LX, RX]) {
+      g.fillStyle = '#2b1d18';
+      g.beginPath();
+      g.ellipse(x, EY + 5, 7, 9, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.arc(x + 2, EY + 2, 2.5, 0, Math.PI * 2);
+      g.fill();
+    }
   } else if (mood === 'pout' || mood === 'serious') {
     // 반쯤 감은 눈. 삐지면 눈동자가 옆으로 간다
     const off = mood === 'pout' ? -4 : 0;
@@ -196,7 +209,7 @@ function faceTexture(mood, blush, makeup = null) {
 
   // 진한 아이라인과 속눈썹
   if (madam) {
-    const openMood = ['idle', 'talk', 'chew', 'angry', 'sad', 'pout', 'serious', 'annoyed', 'fury'].includes(mood);
+    const openMood = ['idle', 'talk', 'chew', 'angry', 'sad', 'meek', 'pout', 'serious', 'annoyed', 'fury'].includes(mood);
     g.strokeStyle = '#120808';
     for (const [x, s] of [[LX, -1], [RX, 1]]) {
       const open = openMood || (mood === 'wink' && x === LX);
@@ -318,6 +331,34 @@ function faceTexture(mood, blush, makeup = null) {
     g.beginPath();
     g.arc(128, MY + 6, 10, 1.2 * Math.PI, 1.8 * Math.PI);
     g.stroke();
+  } else if (mood === 'meek') {
+    // 우물거리는 작은 입
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(118, MY);
+    g.quadraticCurveTo(121, MY - 4, 124, MY);
+    g.quadraticCurveTo(127, MY + 4, 130, MY);
+    g.quadraticCurveTo(133, MY - 4, 136, MY);
+    g.stroke();
+    // 이마에 드리운 그늘 줄
+    g.strokeStyle = 'rgba(90,110,190,0.55)';
+    g.lineWidth = 3;
+    for (const x of [100, 114, 128, 142, 156]) {
+      g.beginPath();
+      g.moveTo(x, 56);
+      g.lineTo(x, 80 - Math.abs(x - 128) * 0.3);
+      g.stroke();
+    }
+    g.strokeStyle = '#3a2620';
+    // 식은땀
+    g.fillStyle = 'rgba(140,200,255,0.9)';
+    for (const [x, y] of [[194, 98], [62, 108]]) {
+      g.beginPath();
+      g.moveTo(x, y);
+      g.quadraticCurveTo(x - 8, y + 16, x, y + 22);
+      g.quadraticCurveTo(x + 8, y + 16, x, y);
+      g.fill();
+    }
   } else if (mood === 'dizzy') {
     // 꼬불꼬불한 입
     g.beginPath();
@@ -1210,6 +1251,16 @@ export class Person {
       tgt.lean = -0.22;
       tgt.nx = -0.18;
       tgt.ny = 0.15;
+    }
+    // 주눅 들어 움츠린 자세. 어깨를 모으고 손은 무릎에, 고개를 살짝 숙이고 조금 떤다(얼굴은 보이게)
+    if (this.idlePose === 'cower' && this.state === 'sit') {
+      tgt.slx = tgt.srx = -0.5;
+      tgt.slz = -0.08;
+      tgt.srz = 0.08;
+      tgt.elL = tgt.elR = -0.7;
+      tgt.lean = 0.1;
+      tgt.nx = 0.15 + Math.sin(this.t * 17) * 0.02;
+      tgt.bob -= 0.015;
     }
     // 의자에 반쯤 누운 자세. 등을 젖히고 다리를 뻗고, 한 손은 머리 뒤로 다른 손은 책상 위로
     if (this.idlePose === 'recline' && this.state === 'sit') {
