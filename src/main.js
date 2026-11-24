@@ -2449,6 +2449,7 @@ function sendChat(e) {
   me.do('talk');
   send('act', { a: 'talk' });
   meSay(text, 3);
+  mtgAgenda(text);
   if (me.seat) {
     const mates = seated(me.seat.table).filter((q) => q !== me && !q.remote);
     mates.forEach((q, i) =>
@@ -3192,6 +3193,16 @@ function onNet(m) {
   } else if (m.t === 'nap') {
     if (d.on) startNap(p, typeof d.s === 'string' ? BLD.seatById(d.s) : null);
     else if (p.napping) endNap(p, d.i | 0);
+  } else if (m.t === 'oy') {
+    if (p.bz === 'B4' && d.e === 'nag') oyNag(p, Math.max(1, Math.min(3, d.lv | 0)), d.i | 0, d.t === 'p' ? 'p' : 'y');
+    else if (p.bz === 'B4' && d.e === 'beat') oyBeat(p, d.i | 0);
+  } else if (m.t === 'mtg') {
+    if (d.e === 'start') startMtg(p, Array.isArray(d.ids) ? d.ids.map(String) : []);
+    else if (d.e === 'think') mtgThink(String(d.who || p.name || '').slice(0, 12), String(d.q || '').slice(0, 40));
+    else if (d.e === 'say' && typeof d.t === 'string') mtgSay(d.t, !!d.hard);
+    else if (d.e === 'end') endMtg('...다음부턴 정리해서 오세요.');
+  } else if (m.t === 'det') {
+    onDetNet(d, p);
   } else if (m.t === 'bg') {
     onBingoNet(d, m.f);
   } else if (m.t === 'cig') {
@@ -4714,13 +4725,14 @@ const trigIn = new Set();
 let elevFrom = 'B1';
 
 // 층마다 일하는 사람들. 내가 그 층에 있을 때만 수다를 떤다
-// 4층은 사용자가 준 조직도 사람들. 재무팀에 팀장 풍뎅이(반쯤 누워 일함)와 사원 풍순
+// 4층은 사용자가 준 조직도 사람들. 재무팀에 팀장 풍뎅이(반쯤 누워 일함), 사원 풍순, 사원 김예일(풍순 맞은편, 원래 공석)
 // 사원 연구리, 고문 주피(재무팀 섬 머리), 인턴 풍준·풍열(경영지원팀)은 자리 이름표만 있고 누구나 앉을 수 있다
 const WORKER_DEFS = [
   { bz: 'B4', name: '대표 강아지 장', spot: 'ceo', look: { style: 'short', hair: 0x6a4228, shirt: 0x1f2a44, pants: 0x1f2128, acc: 'ears' }, lines: ['다들 오늘 회식 어때요?', '멍! ...아니 방금 건 기침이에요', '이번 분기 숫자 가져와 봐요', '오늘은 법카로 풍속의 밤 간다!'] },
   { bz: 'B4', name: '팀장 풍뎅이', spot: 'lead', pose: 'recline', look: { style: 'short', hair: 0x1c1512, shirt: 0xf1ede4, pants: 0x2a2a2a, outfit: 'cabaret' }, lines: ['아~ 결재는 내일 하자~', '이 정도면 오늘 일 많이 했다...', '누가 커피 좀 타 줄 사람~', '퇴근까지 몇 시간 남았냐...'] },
   { bz: 'B4', name: '상무 희동', spot: 'cfo', look: { style: 'short', hair: 0x1a1410, shirt: 0x34416e, pants: 0x2a2a30, skin: 0xe8735e }, lines: ['끅... 아, 결재 보고 있었어요', '숫자가 자꾸 두 개로 보이네...', '오늘 저녁 풍속의 밤 갈 사람?', '예산은... 내일 얘기합시다'] },
   { bz: 'B4', name: '사원 풍순', spot: 'pungsun', look: { style: 'madam', hair: 0x4a1420, shirt: 0xf2c6d6, pants: 0x2a2a2a, skirt: 0x2a2a3a, legs: 0x3a2a30, shoes: 0x1a1a1a, makeup: 'madam', skin: 0xffffff }, lines: ['녜에... 지금 할게요', '칼퇴 각이다~ 호호', '엑셀 또 멈췄어요...', '자기야 아니 팀장님~'] },
+  { bz: 'B4', name: '사원 김예일', spot: 'empty', look: { style: 'long', hair: 0x3a2418, shirt: 0xf4f1ea, pants: 0x2a2a30, skirt: 0x2a2a30, legs: 0xffdcc8, shoes: 0x3a3a3e, acc: 'band' }, lines: ['네! 바로 할게요!', '엑셀 함수가 또 안 먹어요...', '풍순 선배~ 이거 어떻게 해요?', '오늘 회식 있어요?', '팀장님 또 누워 계시네...'] },
   { bz: 'B3', name: 'CGI 아티스트', spot: 'g1_0', look: { style: 'short', hair: 0x6a4a3a, shirt: 0x37557a, pants: 0x262a30, acc: 'glasses' }, lines: ['렌더 언제 끝나...', '털 시뮬레이션 또 터졌다', '라이트 하나만 더 넣을게요'] },
   { bz: 'B3', name: '라이팅 아티스트', spot: 'g2_5', look: { style: 'bob', hair: 0xc9a27a, shirt: 0xb8434a, pants: 0x2a2a2a }, lines: ['그림자가 너무 진한가?', '노을빛으로 바꿔 볼게요', '렌더팜 자리 있어요?'] },
   { bz: 'B3', name: '애니메이터', spot: 'g3_12', look: { style: 'pony', hair: 0x2b1d17, shirt: 0x9aa7b8, pants: 0x3b2f2a }, lines: ['걷는 동작 다시 잡을게요', '키프레임 300개째...', '이 캐릭터 사장님 닮았다 ㅋㅋ'] },
@@ -4770,6 +4782,11 @@ function workerTick(dt) {
     w.timer -= dt;
     if (w.timer > 0) continue;
     w.timer = rnd(8, 15);
+    if (w.sulkUntil > simT) {
+      if (!w.action) w.do('humph');
+      say(w, pick(w.worker.spot === 'pungsun' ? PS_SULK : OY_SULK), 2.2);
+      continue;
+    }
     if (!w.action) w.do(pick(['talk', 'laugh', 'wave']));
     say(w, pick(w.worker.lines), 2.4);
   }
@@ -4958,8 +4975,19 @@ function officeUpdate() {
   showBtn('#bDoze', !!me.officeSeat && !napping);
   showBtn('#bKnock', me.bz === 'B4' && !napping);
   showBtn('#bNap', me.bz === 'B4');
+  showBtn('#bOy', me.bz === 'B4' && !napping);
+  showBtn('#bMtg', me.bz === 'B4' && !napping && !(mtg && mtg.phase === 'back'));
+  const mtgTxt = mtg ? '회의 끝내기' : '회의하기';
+  if ($('#bMtgTxt').textContent !== mtgTxt) $('#bMtgTxt').textContent = mtgTxt;
   showBtn('#bHd', me.bz === 'B4' && !napping);
   showBtn('#bBingo', inMeetSeat(me) && !napping && !(bingo && bingo.my));
+  showBtn('#bDet', inMeetSeat(me) && !napping && !(det && !det.over));
+  // 탐정단 판은 회의실 의자에 앉아 있을 때만 보인다
+  const detShow = !!det && inMeetSeat(me);
+  if ($('#det').hidden === detShow) {
+    $('#det').hidden = !detShow;
+    if (detShow) renderDet();
+  }
   const napTxt = napping ? '일어나기' : '몰래 자기';
   if ($('#bNapTxt').textContent !== napTxt) $('#bNapTxt').textContent = napTxt;
   const terr = onTerrace(me) && !napping;
@@ -5484,6 +5512,239 @@ function bingoUpdate() {
   }
 }
 
+// ---------- 회의실 탐정단 ----------
+// 회의실 의자에 앉은 사람들이 다 같이 사건을 푼다. 예/아니오 질문을 하면 AI 기록관(서버 /api/detective, Gemini)이 답한다
+// 진상은 서버에만 있다. 묻거나 추리한 사람의 화면이 서버에 묻고, 결과를 신호로 모두에게 보낸다
+// 신호 det{e: start|qa|guess|reveal|end}
+const DET_API = '/api/detective';
+const DET_A = { yes: '예', no: '아니오', irrelevant: '상관없음' };
+let det = null;
+let detBusy = false;
+
+async function detCall(body) {
+  let r;
+  try {
+    r = await fetch(DET_API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  } catch (e) {
+    throw new Error('offline');
+  }
+  let j = null;
+  try {
+    j = await r.json();
+  } catch (e) {}
+  if (r.status === 429) throw new Error('busy');
+  if (r.status === 503) throw new Error('nokey');
+  if (!r.ok || !j) throw new Error(r.status === 404 && !j ? 'offline' : 'fail');
+  return j;
+}
+
+function detErr(e) {
+  const m = e && e.message;
+  if (m === 'busy') toast('기록관이 잠깐 숨 돌리는 중이에요. 몇 초 뒤에 다시 물어봐 주세요');
+  else if (m === 'nokey') toast('기록관이 아직 출근 전이에요 (Vercel 에 GEMINI_API_KEY 설정 필요)');
+  else if (m === 'offline') toast('탐정단은 배포된 주소에서만 할 수 있어요');
+  else toast('기록관 대답을 못 받았어요. 다시 해 볼까요?');
+}
+
+$('#bDet').onclick = async () => {
+  if (blocked() || !inMeetSeat(me)) return;
+  if (det && !det.over) return toast('지금 사건을 푸는 중이에요');
+  let j;
+  try {
+    j = await detCall({ op: 'list' });
+  } catch (e) {
+    return detErr(e);
+  }
+  const box = $('#detList');
+  box.innerHTML = '';
+  for (const c of j.cases || []) {
+    const b = document.createElement('button');
+    b.textContent = c.title;
+    const sm = document.createElement('small');
+    sm.textContent = c.level + ' · ' + c.setup.slice(0, 40) + '…';
+    b.appendChild(sm);
+    b.onclick = () => {
+      $('#detSheet').classList.remove('show');
+      if (!inMeetSeat(me)) return;
+      const g = { id: Math.random().toString(36).slice(2, 8), caseId: c.id, title: c.title, setup: c.setup };
+      send('det', { e: 'start', ...g });
+      startDet(g, me);
+    };
+    box.appendChild(b);
+  }
+  if (!j.ready) toast('기록관이 아직 출근 전이에요 (Vercel 에 GEMINI_API_KEY 설정 필요)');
+  $('#detSheet').classList.add('show');
+};
+$('#detClose').onclick = () => $('#detSheet').classList.remove('show');
+
+function startDet(g, by) {
+  det = { id: g.id, caseId: g.caseId, title: String(g.title).slice(0, 40), setup: String(g.setup).slice(0, 400), log: [], asked: new Map(), q: 0, tries: 0, over: false, truth: '' };
+  if (by) say(by, `사건 파일을 열었어요: ${det.title}`, 2.2);
+  renderDet();
+}
+
+function endDet() {
+  det = null;
+  $('#det').hidden = true;
+}
+
+const detNorm = (q) => String(q).replace(/[\s?？.!~]+/g, '');
+
+// 질문. 이미 나온 질문이면 서버에 다시 묻지 않는다
+$('#detAsk').onsubmit = async (e) => {
+  e.preventDefault();
+  const D = det;
+  const q = $('#detQ').value.trim().slice(0, 80);
+  if (!D || D.over || !q || detBusy) return;
+  const old = D.asked.get(detNorm(q));
+  if (old) {
+    $('#detQ').value = '';
+    return toast(`이미 나온 질문이에요: ${DET_A[old]}`);
+  }
+  detBusy = true;
+  try {
+    const j = await detCall({ op: 'ask', caseId: D.caseId, q });
+    if (det !== D) return;
+    if (j.a === 'invalid') return toast('예 / 아니오로 답할 수 있게 물어봐 주세요');
+    $('#detQ').value = '';
+    send('det', { e: 'qa', id: D.id, q, a: j.a });
+    detQa(me, q, j.a);
+  } catch (err) {
+    detErr(err);
+  } finally {
+    detBusy = false;
+  }
+};
+
+function detQa(p, q, a) {
+  const D = det;
+  if (!D || D.over || !DET_A[a]) return;
+  if (D.asked.has(detNorm(q))) return;
+  D.asked.set(detNorm(q), a);
+  D.q++;
+  D.log.push({ t: 'qa', who: p === me ? myName || '나' : p.name, q, a });
+  if (p) say(p, q, 2.4);
+  renderDet();
+}
+
+// 추리 제출. 핵심을 다 맞히면 해결
+$('#detSolve').onsubmit = async (e) => {
+  e.preventDefault();
+  const D = det;
+  const g = $('#detG').value.trim().slice(0, 200);
+  if (!D || D.over || g.length < 4 || detBusy) return;
+  detBusy = true;
+  try {
+    const j = await detCall({ op: 'solve', caseId: D.caseId, g });
+    if (det !== D) return;
+    $('#detG').value = '';
+    const r = { e: 'guess', id: D.id, g, ok: !!j.ok, hits: j.hits | 0, total: j.total | 0, comment: j.comment || '', truth: j.truth || '' };
+    send('det', r);
+    detGuess(me, r);
+  } catch (err) {
+    detErr(err);
+  } finally {
+    detBusy = false;
+  }
+};
+
+function detGuess(p, r) {
+  const D = det;
+  if (!D || D.over) return;
+  D.tries++;
+  D.log.push({ t: 'g', who: p === me ? myName || '나' : p.name, g: String(r.g).slice(0, 200), ok: r.ok, hits: r.hits, total: r.total, comment: String(r.comment || '').slice(0, 60) });
+  if (p) say(p, r.ok ? '범인은... 바로!' : '내 추리는...', 1.8);
+  if (r.ok) {
+    D.over = true;
+    D.truth = String(r.truth || '').slice(0, 600);
+    D.solver = p === me ? myName || '나' : p.name;
+    if (p) {
+      later(1.6, () => say(p, '사건 해결!', 2.4, true));
+      W.sparkle(p.headWorld(new THREE.Vector3()));
+    }
+    if (me.bz === 'B4') sound.yeah();
+  }
+  renderDet();
+}
+
+$('#detGive').onclick = async () => {
+  const D = det;
+  if (!D || D.over || detBusy) return;
+  detBusy = true;
+  try {
+    const j = await detCall({ op: 'reveal', caseId: D.caseId });
+    if (det !== D) return;
+    send('det', { e: 'reveal', id: D.id, truth: j.truth });
+    detReveal(j.truth);
+  } catch (err) {
+    detErr(err);
+  } finally {
+    detBusy = false;
+  }
+};
+
+function detReveal(truth) {
+  const D = det;
+  if (!D || D.over) return;
+  D.over = true;
+  D.gaveUp = true;
+  D.truth = String(truth || '').slice(0, 600);
+  renderDet();
+}
+
+$('#detEnd').onclick = () => {
+  if (!det) return;
+  send('det', { e: 'end', id: det.id });
+  endDet();
+};
+
+function onDetNet(d, p) {
+  if (d.e === 'start') {
+    if (det && !det.over) return;
+    if (typeof d.caseId !== 'string' || typeof d.id !== 'string') return;
+    return startDet({ id: d.id, caseId: d.caseId, title: d.title || '', setup: d.setup || '' }, p);
+  }
+  if (!det || d.id !== det.id) return;
+  if (d.e === 'qa') detQa(p, String(d.q || '').slice(0, 80), d.a);
+  else if (d.e === 'guess') detGuess(p, d);
+  else if (d.e === 'reveal') detReveal(d.truth);
+  else if (d.e === 'end') endDet();
+}
+
+function renderDet() {
+  const D = det;
+  const show = !!D && inMeetSeat(me);
+  if ($('#det').hidden === show) $('#det').hidden = !show;
+  if (!D) return;
+  $('#detTitle').textContent = '탐정단 · ' + D.title;
+  $('#detSetup').textContent = D.setup;
+  const box = $('#detLog');
+  box.innerHTML = '';
+  for (const L of D.log) {
+    const el = document.createElement('div');
+    if (L.t === 'qa') {
+      el.textContent = `${L.who}: ${L.q} → `;
+      const b = document.createElement('b');
+      b.className = L.a === 'yes' ? 'y' : L.a === 'no' ? 'n' : 'i';
+      b.textContent = DET_A[L.a];
+      el.appendChild(b);
+    } else {
+      el.className = 'g';
+      el.textContent = `${L.who}의 추리: ${L.g} → ${L.ok ? '정답!' : `땡 (${L.hits}/${L.total})`}${L.comment && !L.ok ? ' · ' + L.comment : ''}`;
+    }
+    box.appendChild(el);
+  }
+  if (D.over) {
+    const t = document.createElement('div');
+    t.className = 'truth';
+    t.textContent = (D.gaveUp ? '진상: ' : `${D.solver} 해결! 진상: `) + D.truth;
+    box.appendChild(t);
+  }
+  box.scrollTop = box.scrollHeight;
+  $('#detStat').textContent = `질문 ${D.q}번 · 추리 ${D.tries}번` + (D.over && !D.gaveUp ? ' 만에 해결' : '');
+  for (const id of ['#detAsk', '#detSolve', '#detGive']) $(id).hidden = D.over;
+}
+
 // ---------- 테라스에서 소리지르기 ----------
 // 4층 테라스에 나가면 적은 말을 그대로 크게 외친다. 같은 층 직원이 가끔 반응한다
 const TERRACE_X = -8.05;
@@ -5541,6 +5802,7 @@ let knockAt = -99;
 
 function knockPungsun() {
   if (me.bz !== 'B4' || me.knockRun || simT - knockAt < 2) return;
+  if (mtg) return toast('풍순이는 회의 중이에요');
   const s = pungsunW();
   const seat = BLD.zones.B4.seatByKey.pungsun;
   if (!s || !seat) return;
@@ -5602,7 +5864,7 @@ function bldSeparate() {
   const Z = BLD.zones[me.bz];
   const ps = people.filter((p) => p.bz === me.bz && p.state !== 'sit' && !p.knocked);
   // 회의실·담배·얼차려로 불려 나온 직원은 다른 사람처럼 비켜 간다
-  const fixed = (p) => p.worker && !(meet && meet.t === p) && !(hdEv && hdEv.t === p);
+  const fixed = (p) => p.worker && !(meet && meet.t === p) && !(hdEv && hdEv.t === p) && !(mtg && (mtg.t === p || mtg.ps === p));
   for (let i = 0; i < ps.length; i++) {
     for (let j = i + 1; j < ps.length; j++) {
       const a = ps[i];
@@ -5721,6 +5983,405 @@ function coffeeRunUpdate() {
   officeAct(me, 'brew', R.i);
 }
 
+// ---------- 사원 김예일·조풍순(사무실): 때리기, 구박하기 ----------
+// 4층 '예일·풍순' → 창에서 고른다. 때리기는 예일이 자리 옆 통로로 걸어가서 한다(앉아 있었으면 끝나고 그 자리로 돌아감)
+// 구박은 재무·경영지원팀 방 안에 있으면 그 자리에서 바로, 밖이면 그 사람 자리 옆으로 걸어가서 한다
+// 구박은 사람마다 40초 안에 연달아 하면 세지고, 세 번째엔 울면서 60초 삐진다. 신호 oy{e: beat|nag, t(y|p), lv, i}
+const OY_NAG = ['예일씨, 이것도 몰라요?', '보고서 오타가 몇 개야, 이거?', '하... 내가 몇 번 말해요?', '예일씨는 학교에서 뭐 배웠어요?', '일을 이렇게 하면 어떡해요?'];
+const OY_NAG_BACK = ['죄, 죄송합니다...', '...네, 다시 할게요', '흐아앙... 저도 열심히 했단 말이에요!!'];
+const OY_HIT = ['악!', '아야!', '왜 때려요!!'];
+const OY_SULK = ['...흥.', '말 걸지 마세요.', '...(모니터만 노려본다)'];
+const PS_NAG = ['풍순씨, 화장 고칠 시간에 일 좀 해요', '이거 또 틀렸잖아요, 풍순씨', '풍순씨는 맨날 칼퇴 생각만 하죠?', '엑셀 멈췄다는 핑계 이제 그만해요'];
+const PS_NAG_BACK = ['녜에... 죄송해요~', '...흥, 알겠어요오', '흐엉... 자기야 아니 팀장님~!! 저 구박당했어요!!'];
+const PS_SULK = ['흥, 풍순이 오늘 아무하고도 말 안 해요.', '...(거울만 본다)', '자기야 아니 팀장님~ 쟤 좀 봐요...'];
+const oyW = () => WORKERS.find((w) => w.worker.spot === 'empty');
+// 재무·경영지원팀 방(지역 좌표 x -8.0~-1.8, z -5.2~-0.75) 안인지
+const inFinRoom = (p) => {
+  if (p.bz !== 'B4') return false;
+  const Z = BLD.zones.B4;
+  const x = (p.pos.x - Z.c.x) / Z.S;
+  const z = (p.pos.z - Z.c.z) / Z.S;
+  return x > -8.0 && x < -1.8 && z > -5.2 && z < -0.75;
+};
+let oyAt = -99;
+const oyNagAt = { y: -99, p: -99 };
+const oyNagLv = { y: 0, p: 0 };
+
+$('#bOy').onclick = () => {
+  if (blocked() || me.bz !== 'B4') return;
+  $('#oySheet').classList.add('show');
+};
+$('#oyClose').onclick = () => $('#oySheet').classList.remove('show');
+document.querySelectorAll('[data-oy]').forEach(
+  (b) =>
+    (b.onclick = () => {
+      $('#oySheet').classList.remove('show');
+      oyGo(b.dataset.oy === 'nag' ? 'nag' : b.dataset.oy === 'nagP' ? 'nagP' : 'beat');
+    })
+);
+
+function oyGo(kind) {
+  if (me.bz !== 'B4' || me.oyRun || simT - oyAt < 2.5) return;
+  const t = kind === 'nagP' ? 'p' : 'y';
+  const w = t === 'p' ? pungsunW() : oyW();
+  const seat = BLD.zones.B4.seatByKey[t === 'p' ? 'pungsun' : 'empty'];
+  if (!w || !seat) return;
+  if (t === 'p' && mtg) return toast('풍순이는 회의 중이에요');
+  if (w.state !== 'sit') return toast(t === 'p' ? '풍순이가 자리에 없어요' : '예일씨가 자리에 없어요');
+  // 구박은 같은 방 안이면 그 자리에서 바로
+  if (kind !== 'beat' && inFinRoom(me)) return oyDo(kind);
+  // 그 사람 옆 통로 쪽
+  const spot = t === 'p' ? { x: seat.x + 0.05, z: seat.z + 0.56 } : { x: seat.x, z: seat.z + 0.62 };
+  me.oyRun = { kind, spot, back: me.officeSeat };
+  if (Math.hypot(me.pos.x - spot.x, me.pos.z - spot.z) > 0.3) bldGo(spot);
+}
+
+function oyRunUpdate() {
+  const R = me.oyRun;
+  if (!R || me.state === 'walk') return;
+  me.oyRun = null;
+  if (me.bz !== 'B4' || Math.hypot(me.pos.x - R.spot.x, me.pos.z - R.spot.z) > 0.6) return;
+  oyDo(R.kind);
+  const back = R.back;
+  if (back) later(3, () => {
+    if (me.bz === 'B4' && me.state !== 'walk' && !me.officeSeat && !me.oyRun && !back.occupant) officeGo(back);
+  });
+}
+
+function oyDo(kind) {
+  oyAt = simT;
+  const i = (Math.random() * 10) | 0;
+  if (kind === 'beat') {
+    send('oy', { e: 'beat', i });
+    return oyBeat(me, i);
+  }
+  const t = kind === 'nagP' ? 'p' : 'y';
+  oyNagLv[t] = simT - oyNagAt[t] < 40 ? Math.min(3, oyNagLv[t] + 1) : 1;
+  oyNagAt[t] = simT;
+  send('oy', { e: 'nag', t, lv: oyNagLv[t], i });
+  oyNag(me, oyNagLv[t], i, t);
+  if (oyNagLv[t] >= 3) oyNagLv[t] = 0;
+}
+
+function oyFace(p, w) {
+  p.targetYaw = Math.atan2(w.pos.x - p.pos.x, w.pos.z - p.pos.z);
+  p.action = null;
+}
+
+function oyNag(p, lv, i, t = 'y') {
+  const w = t === 'p' ? pungsunW() : oyW();
+  if (!w) return;
+  const NAG = t === 'p' ? PS_NAG : OY_NAG;
+  const BACK = t === 'p' ? PS_NAG_BACK : OY_NAG_BACK;
+  oyFace(p, w);
+  p.do('warn');
+  say(p, NAG[i % NAG.length], 2.2);
+  w.timer = Math.max(w.timer, 8);
+  later(1.4, () => {
+    w.action = null;
+    if (lv >= 3) {
+      w.do('ouch');
+      say(w, BACK[2], 2.6, true);
+      // 풍순이가 팀장한테 이르면 팀장은 늘 그렇듯
+      const ld = leadOf();
+      if (t === 'p' && ld && !mtg && !meet) later(2.0, () => say(ld, '...블로그 찾아서 보시죠.', 2.4));
+      w.faceMood = 'sad';
+      // 울고 나서 60초 삐진다
+      w.sulkUntil = simT + 60;
+      later(3, () => w.sulkUntil > simT && (w.faceMood = 'pout'));
+      later(60, () => {
+        if (w.sulkUntil <= simT && w.faceMood === 'pout') w.faceMood = null;
+      });
+    } else {
+      w.do('humph');
+      say(w, BACK[lv - 1] || BACK[0], 2.2);
+      if (!(w.sulkUntil > simT)) {
+        w.faceMood = 'sad';
+        later(4, () => w.faceMood === 'sad' && !(w.sulkUntil > simT) && (w.faceMood = null));
+      }
+    }
+  });
+}
+
+function oyBeat(p, i) {
+  const w = oyW();
+  if (!w) return;
+  oyFace(p, w);
+  p.do('punch', 1.8);
+  w.timer = Math.max(w.timer, 8);
+  for (let k = 0; k < 3; k++)
+    later(0.3 + k * 0.5, () => {
+      sound.slap();
+      W.sparkle(w.headWorld(new THREE.Vector3()));
+      w.action = null;
+      w.do('hurt');
+      say(w, OY_HIT[(i + k) % OY_HIT.length], 0.6, true);
+    });
+  later(2.0, () => {
+    w.setPlaster(true);
+    w.faceMood = 'sad';
+    say(w, '흐엉... 사무실에서 이러셔도 돼요?!', 2.6, true);
+    const n = (w.plasterN = (w.plasterN | 0) + 1);
+    later(60, () => w.plasterN === n && w.setPlaster(false));
+    later(6, () => w.faceMood === 'sad' && !(w.sulkUntil > simT) && (w.faceMood = null));
+  });
+  // 맞은편 풍순이 한마디
+  later(3.0, () => {
+    const ps = pungsunW();
+    if (ps && ps.state === 'sit' && !mtg) say(ps, i % 2 ? '어머 예일이 또 맞네~ 호호' : '...사무실에서 이러면 안 돼요~', 2);
+  });
+}
+
+// ---------- 회의하기 ----------
+// 4층 '회의하기' → 팀장 풍뎅이가 "회의 하시죠." 하고 풍순이와 회의실로 간다. 4층에 있는 사람도 다 같이 회의실 의자로 간다
+// 회의 중 회의실 의자에 앉은 사람이 수다방에 안건을 말하면, 풍뎅이가 눈을 게슴츠레 뜨고 팔짱 낀 채 비꼬며 대답한다
+// 신호 mtg{e: start|reply|end}
+const MTG_SEC = 240;
+const MTG_IDLE_SEC = 20;
+// 대답은 AI(서버 /api/meeting, Gemini)가 방금 한 말에 맞춰 만든다. 서버를 못 쓰면(데모, 키 없음, 한도) 아래 대사로 대신한다
+// 말 종류(질문, 제안, 보고, 그 밖)를 보고 고른다. {q} 는 방금 한 말 앞부분
+const MTG_FALLBACK = {
+  ask: ['그걸... 왜 저한테 물어봐요?', '"{q}"...? 그건 본인이 먼저 알아보셔야죠.', '흐음... 그거 지난주 회의록에 있지 않아요?'],
+  propose: ['그렇게 하는 이유 있어요?', '"{q}"...? 하... 근거는요?', '그거 해서 뭐가 좋아지는데요?', '그걸... 굳이... 지금...?'],
+  report: ['아~ 네네... 그래서요?', '"{q}"... 그걸 이제 하셨어요?', '음~ 그건 알겠고, 결론이 뭔데요?'],
+  other: ['그게....무스흐흔....말이지...?', '"{q}"요? 흐음... 회의 시간에 할 얘기예요?', '와... 그 생각을 어떻게 하셨어요? 신기하네~'],
+};
+const MTG_PROPOSE = /하죠|합시다|하면|할까요|어때요|어떨까요|늘리|줄이|바꾸|바꿔|추가|도입|해야/;
+const MTG_REPORT = /했습니다|했어요|했고|완료|끝났|진행|마쳤|올렸|보냈/;
+const MTG_PS = ['녜에... 팀장님 말씀이 맞는 것 같아요~', '(하품)...녜?', '호호, 팀장님 또 시작이다~'];
+// 팀장한테 되묻거나 방법을 물으면 곤란해져서(식은땀) 이렇게 넘긴다
+const MTG_BLOG = '...블로그 찾아서 보시죠.';
+const MTG_HARD = /[?？]|어떻게|방법|알려|뭐예요|뭔가요|왜요|팀장님/;
+let mtg = null;
+
+$('#bMtg').onclick = () => {
+  if (blocked() || me.bz !== 'B4') return;
+  if (mtg) {
+    if (mtg.phase === 'back') return;
+    send('mtg', { e: 'end' });
+    return endMtg('...다음부턴 정리해서 오세요.');
+  }
+  if (meet) return toast('팀장님이 회의실에 불려 가 있어요');
+  const t = leadOf();
+  const ps = pungsunW();
+  if (!t || !ps || t.knocked) return;
+  // 4층에 있는 사람 순서. 화면마다 같은 순서로 회의실 의자를 나눠 앉는다
+  const ids = [MY_ID, ...[...peers.values()].filter((r) => r.p.bz === 'B4').map((r) => r.id).sort()];
+  send('mtg', { e: 'start', ids });
+  startMtg(me, ids);
+};
+
+function startMtg(p, ids) {
+  const t = leadOf();
+  const ps = pungsunW();
+  if (!t || !ps || mtg || meet) return;
+  const K = BLD.zones.B4.seatByKey;
+  // 팀장은 상석(회의실 머리), 풍순이는 그 옆. 누가 앉아 있으면 빈 의자로
+  const free = () => meetSeats().filter((st) => !st.occupant);
+  const tSeat = !K.meet4.occupant ? K.meet4 : free()[0];
+  if (!tSeat) return toast('회의실 의자가 꽉 찼어요');
+  tSeat.occupant = t;
+  const pSeat = !K.meet3.occupant ? K.meet3 : free()[0];
+  if (pSeat) pSeat.occupant = ps;
+  const M = (mtg = { p, t, ps, phase: 'go', at: simT, until: simT + 25, lastReply: -99, n: 0, idleAt: simT, hist: [], home: { t: K.lead, ps: K.pungsun }, dst: { t: tSeat, ps: pSeat } });
+  say(t, '회의 하시죠.', 2.2);
+  t.timer = ps.timer = 99;
+  later(0.8, () => mtg === M && say(ps, '녜에~', 1.6));
+  later(1.0, () => {
+    if (mtg !== M) return;
+    for (const k of ['t', 'ps']) {
+      const q = M[k];
+      const dst = M.dst[k];
+      q.idlePose = null;
+      q.baseY = 0;
+      q.action = null;
+      if (!dst) continue;
+      q.walkTo(BLD.path('B4', q.pos, dst));
+      // 비운 동안 자기 자리는 계속 차지
+      M.home[k].occupant = q;
+      dst.occupant = q;
+    }
+  });
+  // 4층에 있는 사람은 다 같이 회의실 의자로
+  if (me.bz === 'B4' && ids.includes(MY_ID) && !inMeetSeat(me)) {
+    const seats = meetSeats().filter((st) => !st.occupant);
+    const st = seats[ids.indexOf(MY_ID)];
+    if (st) later(1.2, () => mtg === M && !inMeetSeat(me) && !st.occupant && officeGo(st));
+    else toast('회의실 의자가 모자라서 서서 들어요');
+  }
+}
+
+// 안건을 말하면 팀장이 비꼰다. 말한 사람 화면이 대답을 만들어(AI, 안 되면 미리 써 둔 대사) 모두에게 보낸다
+// 너무 자주는 안 받아 준다
+function mtgAgenda(text) {
+  const M = mtg;
+  if (!M || M.phase !== 'on' || !inMeetSeat(me)) return;
+  // 대답을 기다리는 중이면 마지막 말을 기억했다가 이어서 받는다
+  if (M.asking || simT - M.lastReply < 1.5) {
+    M.queued = text;
+    return;
+  }
+  const q = String(text).slice(0, 40);
+  const who = myName || '나';
+  M.lastReply = simT;
+  M.asking = true;
+  send('mtg', { e: 'think', who, q });
+  mtgThink(who, q);
+  const done = (r, hard) => {
+    M.asking = false;
+    if (mtg !== M || M.phase !== 'on') return;
+    send('mtg', { e: 'say', t: r, hard });
+    mtgSay(r, hard);
+    if (M.queued) {
+      const nx = M.queued;
+      M.queued = null;
+      later(1.6, () => mtgAgenda(nx));
+    }
+  };
+  mtgAsk(q, who, M.hist.slice(-5, -1))
+    .then((j) => done(j.r, !!j.hard))
+    .catch(() => {
+      const f = mtgFallback(q);
+      done(f.t, f.hard);
+    });
+}
+
+// 서버(Gemini)에 팀장 대답을 묻는다. 8초 넘으면 포기
+async function mtgAsk(said, who, history) {
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const tm = ac && setTimeout(() => ac.abort(), 8000);
+  try {
+    const r = await fetch('/api/meeting', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ said, who, history }), signal: ac ? ac.signal : undefined });
+    const j = await r.json();
+    if (!r.ok || !j || typeof j.r !== 'string' || !j.r.trim()) throw new Error('fail');
+    return { r: j.r.trim().slice(0, 60), hard: !!j.hard };
+  } finally {
+    if (tm) clearTimeout(tm);
+  }
+}
+
+// 서버를 못 쓸 때. 말 종류에 맞는 대사를 고른다
+function mtgFallback(q) {
+  const short = q.length > 10 ? q.slice(0, 10) + '...' : q;
+  if (MTG_HARD.test(q) && Math.random() < 0.75) return { t: MTG_BLOG, hard: true };
+  const kind = MTG_HARD.test(q) ? 'ask' : MTG_PROPOSE.test(q) ? 'propose' : MTG_REPORT.test(q) ? 'report' : 'other';
+  return { t: pick(MTG_FALLBACK[kind]).replace('{q}', short), hard: false };
+}
+
+// 누가 안건을 말하면 팀장이 "흐으음..." 하며 뜸을 들인다
+function mtgThink(who, q) {
+  const M = mtg;
+  if (!M || M.phase !== 'on') return;
+  M.idleAt = simT;
+  M.hist.push({ who, t: q });
+  if (M.hist.length > 8) M.hist.shift();
+  later(0.5, () => mtg === M && !M.t.bubbleEl?.classList.contains('show') && say(M.t, '흐으음...', 1.2));
+}
+
+function mtgSay(text, hard) {
+  const M = mtg;
+  if (!M || M.phase !== 'on') return;
+  const t = String(text).slice(0, 60);
+  M.lastReply = simT;
+  M.idleAt = simT;
+  M.n++;
+  M.hist.push({ who: '풍뎅이', t });
+  if (M.hist.length > 8) M.hist.shift();
+  if (hard) {
+    // 곤란하면 식은땀 흘리며 넘긴다
+    M.t.faceMood = 'annoyed';
+    say(M.t, t, 3.2);
+    later(2.8, () => mtg === M && M.t.faceMood === 'annoyed' && (M.t.faceMood = 'smirk'));
+  } else {
+    M.t.faceMood = 'smirk';
+    say(M.t, t, 3.4);
+  }
+  // 세 번에 한 번 풍순이가 거든다
+  if (M.n % 3 === 0) later(2.6, () => mtg === M && say(M.ps, MTG_PS[(M.n / 3) % MTG_PS.length], 2.2));
+}
+
+function endMtg(line) {
+  const M = mtg;
+  if (!M || M.phase === 'back') return;
+  M.phase = 'back';
+  if (line) say(M.t, line, 2.6);
+  later(0.7, () => say(M.ps, '녜에~', 1.4));
+  for (const k of ['t', 'ps']) {
+    const q = M[k];
+    if (q.officeSeat) {
+      if (q.officeSeat.occupant === q) q.officeSeat.occupant = null;
+      q.officeSeat = null;
+    }
+    if (M.dst[k] && M.dst[k].occupant === q) M.dst[k].occupant = null;
+    q.idlePose = null;
+    q.faceMood = null;
+    q.action = null;
+    q.walkTo(BLD.path('B4', q.pos, M.home[k]));
+  }
+}
+
+function mtgUpdate() {
+  const M = mtg;
+  if (!M) return;
+  // 회의 중에는 평소 혼잣말을 하지 않는다
+  if (M.phase !== 'back') M.t.timer = M.ps.timer = 99;
+  if (M.phase === 'go') {
+    // 회의실 의자에 도착하면 앉는다. 팀장은 팔짱 끼고 게슴츠레
+    let done = true;
+    for (const k of ['t', 'ps']) {
+      const q = M[k];
+      const dst = M.dst[k];
+      if (!dst || q.officeSeat === dst) continue;
+      if (q.state !== 'walk' && Math.hypot(q.pos.x - dst.x, q.pos.z - dst.z) < 0.8) {
+        officeSit(q, dst);
+        if (k === 't') {
+          q.idlePose = 'smug';
+          q.faceMood = 'smirk';
+        }
+      } else done = false;
+    }
+    if (done || simT > M.until) {
+      M.phase = 'on';
+      M.at = simT;
+      M.idleAt = simT;
+      say(M.t, '...자, 안건 말해 봐요.', 2.4);
+    }
+  } else if (M.phase === 'on') {
+    // 너무 길어지거나 회의실에 아무도 없으면 끝
+    const anyone = people.some((q) => !q.worker && q.bz === 'B4' && inMeetSeat(q));
+    if (anyone) M.emptyAt = 0;
+    else if (!M.emptyAt) M.emptyAt = simT;
+    if (simT - M.at > MTG_SEC) endMtg('...시간 다 됐네요. 회의 끝.');
+    else if (M.emptyAt && simT - M.emptyAt > MTG_IDLE_SEC) endMtg('...다들 어디 갔어? 회의 끝.');
+    else if (simT - M.idleAt > 30) {
+      M.idleAt = simT;
+      say(M.t, '...안건 없어요? 없으면 끝낼까요?', 2.6);
+    }
+  } else if (M.phase === 'back') {
+    // 자기 자리로 돌아가 앉는다. 팀장은 다시 반쯤 눕는다
+    let done = true;
+    for (const k of ['t', 'ps']) {
+      const q = M[k];
+      if (q.state === 'walk') {
+        done = false;
+        continue;
+      }
+      if (q.state === 'sit') continue;
+      const st = M.home[k];
+      st.occupant = null;
+      q.sitAt(st);
+      if (k === 't') {
+        q.idlePose = 'recline';
+        q.root.position.x += Math.sin(st.yaw) * 0.2;
+        q.root.position.z += Math.cos(st.yaw) * 0.2;
+        q.baseY = -0.1;
+      }
+      q.timer = rnd(6, 10);
+    }
+    if (done) mtg = null;
+  }
+}
+
 // ---------- 회의실 호출 ----------
 // 4층에서 누구나 팀장 풍뎅이를 회의실로 불러 배를 마구 때릴 수 있다
 // 만화처럼 눈앞이 번쩍하며 쓰러졌다가 일어나 자리로 돌아간다. 부른 사람이 'meet' 를 보내 모든 화면이 같게 흘러간다
@@ -5736,6 +6397,7 @@ const b4 = (pt) => ({ x: BLD.zones.B4.c.x + pt.x * BLD.zones.B4.S, z: BLD.zones.
 
 function callMeet() {
   if (me.bz !== 'B4') return;
+  if (mtg) return toast('지금 회의 중이에요');
   if (meet) return toast('팀장님이 이미 회의실에 불려 가 있어요');
   const t = leadOf();
   if (!t || t.knocked) return;
@@ -5748,7 +6410,7 @@ $('#bMeet').onclick = callMeet;
 
 function startMeet(p) {
   const t = leadOf();
-  if (!t || meet) return;
+  if (!t || meet || mtg) return;
   const seat = BLD.zones.B4.seatByKey.lead;
   meet = { p, t, seat, phase: 'go', until: simT + 20, n: 0 };
   say(p, '팀장님, 잠깐 회의실로 오실래요?', 2.2);
@@ -6256,6 +6918,8 @@ function tick(dt) {
   knockRunUpdate();
   napRunUpdate();
   napUpdate(dt);
+  oyRunUpdate();
+  mtgUpdate();
   hdEvUpdate(dt);
   bingoUpdate();
   bldTriggers();
@@ -6359,4 +7023,4 @@ if (QS.has('bar')) {
 }
 
 // 확인용. 주소에 ?debug 를 붙였을 때만 연다
-if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => staffFor(me.seat.table).jobs.push({ table: me.seat.table, kind }), yeil, staffFor, getYSulk: () => ySulk, sorryStaff, startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, beginWoo, getWoo: () => woo, FUNG, startTease, sorryPungsun, getPSulk: () => pSulk, hdBegin, getHd: () => hd, heedong, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, doubles, getTL: () => TL, openLobby, hostStart, joinSlot, enterDoubles, getTennisMode: () => tennisMode, BLD, enterBld, leaveBld, bldMove, bldGo, openElev, rideElev, officeGo, throwPaper, callMeet, getMeet: () => meet, myOfficeAct, knockPungsun, pungsunW, WORKERS, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, getYRoam: () => yRoam, pickStaff, onTerrace, wakeNap, getHdEv: () => hdEv, hdW, getBingo: () => bingo, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };
+if (QS.has('debug')) window.__pungsok = { me, people, W, tableCheers, server, camera, controls, npcs, seated, noBloom: () => (bloom.enabled = false), renderer, goTo, orderFor: (kind) => staffFor(me.seat.table).jobs.push({ table: me.seat.table, kind }), yeil, staffFor, getYSulk: () => ySulk, sorryStaff, startParty, getParty: () => party, boss, setBossMood, pokeBoss, startJinsang, getKick: () => kick, bartender, startSlap, startBeat, goEomuk, beginDate, getDate: () => date, pickKick, getKickChoice: () => kickChoice, getKnockout: () => knockout, beginWoo, getWoo: () => woo, FUNG, startTease, sorryPungsun, getPSulk: () => pSulk, hdBegin, getHd: () => hd, heedong, isComfortDue: () => comfortDue, enterTennis, leaveTennis, tennis, doubles, getTL: () => TL, openLobby, hostStart, joinSlot, enterDoubles, getTennisMode: () => tennisMode, BLD, enterBld, leaveBld, bldMove, bldGo, openElev, rideElev, officeGo, throwPaper, callMeet, getMeet: () => meet, myOfficeAct, knockPungsun, pungsunW, WORKERS, getBrawl: () => brawl, isTennis: () => tennisOn, stats, tableGames, games, applyBan, runPuke, getNausea: () => nausea, myLookIdx: () => myLookIdx, peers, isHost, getRoom: () => ROOM, getRoam: () => roam, getYRoam: () => yRoam, pickStaff, onTerrace, wakeNap, getHdEv: () => hdEv, hdW, getBingo: () => bingo, getDet: () => det, getMtg: () => mtg, oyW, mtgSay, mtgFallback, inFinRoom, freezeCam: () => (camFollow = false), setCam: (tx, ty, tz, cx, cy, cz) => { camFollow = false; controls.minDistance = 0.5; controls.target.set(tx, ty, tz); lastTarget.copy(controls.target); camera.position.set(cx, cy, cz); }, sound, SERVER_HOME, step: (n) => { for (let i = 0; i < n; i++) tick(1 / 30); } };

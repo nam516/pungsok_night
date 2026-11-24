@@ -26,7 +26,7 @@ export const ZONE_NAMES = {
 export const FLOORS = ['B4', 'B3', 'B2', 'B1', 'BM'];
 export const FLOOR_NO = { B4: '4', B3: '3', B2: '2', B1: '1', BM: '-1' };
 export const DIRECTORY = {
-  B4: ['대표실', 'CFO실', '재무팀', '경영지원팀', '신사업실', '회의실', '테라스'],
+  B4: ['대표실', 'CFO실', '재무·경영지원팀', '신사업실', '회의실', '테라스'],
   B3: ['CGI 1실', 'CGI 2실', 'CGI 3실', '서버실'],
   B2: ['COMP 1실, 2실, 3실', 'DP팀', 'COMP팀', '3D팀', 'ART팀', 'Specialist실'],
   B1: ['로비 / 주차장'],
@@ -287,7 +287,7 @@ function orgTex() {
     g.textAlign = 'center';
     g.font = '700 26px "Gowun Dodum", sans-serif';
     g.fillText('조직도', w / 2, 46);
-    const rows = [['대표', '강아지 장'], ['상무', '희동'], ['팀장', '풍뎅이'], ['사원', '연구리 / 풍순'], ['고문', '주피'], ['인턴', '풍준 / 풍열']];
+    const rows = [['대표', '강아지 장'], ['상무', '희동'], ['팀장', '풍뎅이'], ['사원', '연구리 / 풍순 / 예일'], ['고문', '주피'], ['인턴', '풍준 / 풍열']];
     rows.forEach(([a, b], i) => {
       const y = 64 + i * 30;
       g.strokeRect(30, y, 90, 30);
@@ -1189,12 +1189,11 @@ export function buildBuilding(scene) {
       Z.block(-9.85, -9.35, -4.9, -4.4);
       sign(g, '흡연 구역', -8.07, 1.55, -3.55, 0.7, -Math.PI / 2, '#2a2c30', '#ffd36f');
     }
-    // 뒷줄. 경영지원실 | 재무팀 | 창고
+    // 뒷줄. 재무·경영지원팀(한 방) | 창고
     wallRun(Z, g, 'x', ZcN, -8.0, -1.8, [[-7.9, -7.0], [-2.75, -1.95]], 'low', W);
-    wallRun(Z, g, 'z', -4.4, Zb, ZcN, [], 'low', W);
-    // 왼쪽 방은 재무팀. 책상 넷을 붙이고 좌우로 마주 본다
+    // 왼쪽은 재무팀 자리. 책상 넷을 붙이고 좌우로 마주 본다
     //   풍뎅이 →  ← 연구리
-    //   공석   →  ← 조풍순
+    //   김예일 →  ← 조풍순
     sideDesk(Z, g, 'lead', -6.4, -3.6, 1, 4, 0.55);
     sideDesk(Z, g, 'yeonguri', -5.8, -3.6, -1, 4);
     sideDesk(Z, g, 'empty', -6.4, -2.5, 1, 0);
@@ -1202,6 +1201,7 @@ export function buildBuilding(scene) {
     sidePlate(g, '팀장 풍뎅이', -6.4, -3.6, 1, true);
     sidePlate(g, '사원 연구리', -5.8, -3.6, -1, true);
     sidePlate(g, '사원 조풍순', -5.8, -2.5, -1, false);
+    sidePlate(g, '사원 김예일', -6.4, -2.5, 1, false);
     // 섬 머리(뒷벽 쪽)에 고문 주피 자리. 섬을 내려다보듯 앞(+z)을 보고 앉는다
     // 뒷벽에 의자가 묻히지 않게 책상을 조금 얕게(0.5) 둔다
     box(g, 1.0, 0.05, 0.5, deskM, -6.1, 0.74, -4.42);
@@ -1216,13 +1216,12 @@ export function buildBuilding(scene) {
     addSeat(Z, -6.1, -4.95, 0, 'jupi');
     box(g, 0.04, 0.5, 0.04, std(0x2a1c14), -6.1, 1.1, -4.19);
     plane(g, 0.6, 0.17, new THREE.MeshBasicMaterial({ map: textTex(240, 66, '#2a1c14', [['고문 주피', 34, '#ffe1b8']]) }), -6.1, 1.4, -4.16);
-    sign(g, '재무팀', -6.2, 2.55, Zb + 0.02, 1.2);
-    // 오른쪽 방은 경영지원팀. 인턴 둘이 마주 본다
+    sign(g, '재무·경영지원팀', -4.9, 2.55, Zb + 0.02, 1.7);
+    // 오른쪽은 경영지원팀 자리. 인턴 둘이 마주 본다
     desk(Z, g, 'intern1', -3.3, -3.25, 4, true, true);
     desk(Z, g, 'intern2', -3.3, -2.65, 4);
     flatPlate(g, '인턴 풍준', -3.3, -3.25, -1);
     flatPlate(g, '인턴 풍열', -3.3, -2.65, 1);
-    sign(g, '경영지원팀', -3.1, 2.55, Zb + 0.02, 1.0);
     wallRun(Z, g, 'z', -1.8, Zb, ZcN, [], 'full', W);
     wallRun(Z, g, 'x', ZcN, -1.8, -0.05, [], 'full', W);
     box(g, 0.8, 2.1, 0.04, std(0xb8a890), -1.2, 1.05, ZcN + 0.07);

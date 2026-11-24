@@ -88,8 +88,46 @@ function makeGrid(rects, b, cell, pad) {
       }
     }
   }
-  return { nx, nz, block, b, cell };
+  // 칸마다 가장 가까운 막힘(또는 바깥 벽)까지의 칸 수(최대 NEAR_MAX). 넓은 길로 가게 할 때 쓴다
+  const near = new Uint8Array(nx * nz).fill(NEAR_MAX);
+  const q = [];
+  for (let k = 0; k < nz; k++) {
+    for (let i = 0; i < nx; i++) {
+      const n = k * nx + i;
+      if (block[n]) {
+        near[n] = 0;
+        q.push(n);
+      } else if (i === 0 || k === 0 || i === nx - 1 || k === nz - 1) {
+        near[n] = 1;
+        q.push(n);
+      }
+    }
+  }
+  for (let h = 0; h < q.length; h++) {
+    const n = q[h];
+    const d = near[n] + 1;
+    if (d >= NEAR_MAX) continue;
+    const i = n % nx;
+    const k = (n / nx) | 0;
+    for (let dk = -1; dk <= 1; dk++) {
+      for (let di = -1; di <= 1; di++) {
+        const a = i + di;
+        const c = k + dk;
+        if (a < 0 || c < 0 || a >= nx || c >= nz) continue;
+        const m = c * nx + a;
+        if (near[m] > d) {
+          near[m] = d;
+          q.push(m);
+        }
+      }
+    }
+  }
+  return { nx, nz, block, near, b, cell };
 }
+
+// 막힘 바로 옆 칸일수록 지나가는 값을 비싸게 매겨 넓은 쪽(가운데)으로 가게 한다. 인덱스는 near 값
+const NEAR_MAX = 4;
+const NEAR_COST = [0, 1.6, 0.6, 0.2, 0];
 
 function nearestFree(G, i, k) {
   const { nx, nz, block } = G;
@@ -117,6 +155,23 @@ function nearestFree(G, i, k) {
   return [i, k];
 }
 
+// 곧게 질러가도 되는지. 양 끝 근처가 아니면 막힘 바로 옆 칸(near 1)도 지나지 않는다(가구에 스치며 지나가지 않게)
+function clearWide(G, a, c) {
+  const { nx, block, near } = G;
+  const len = Math.max(Math.abs(c[0] - a[0]), Math.abs(c[1] - a[1]));
+  const n = Math.ceil(len * 2) + 1;
+  for (let s = 0; s <= n; s++) {
+    const t = s / n;
+    const i = Math.round(a[0] + (c[0] - a[0]) * t);
+    const k = Math.round(a[1] + (c[1] - a[1]) * t);
+    const m = k * nx + i;
+    if (block[m]) return false;
+    const fromEnd = Math.min(t, 1 - t) * len;
+    if (fromEnd > 1.5 && near[m] < 2) return false;
+  }
+  return true;
+}
+
 // 두 칸 사이를 막힘 없이 곧게 갈 수 있는지
 function clearLine(G, a, c) {
   const { nx, block } = G;
@@ -130,7 +185,7 @@ function clearLine(G, a, c) {
   return true;
 }
 
-export function gridPath(from, to, rects, bounds, cell = 0.2, pad = 0.14) {
+export function gridPath(from, to, rects, bounds, cell = 0.2, pad = 0.18) {
   let G = gridCache.get(rects);
   if (!G) {
     G = makeGrid(rects, bounds, cell, pad);
@@ -144,7 +199,7 @@ export function gridPath(from, to, rects, bounds, cell = 0.2, pad = 0.14) {
   const g = nearestFree(G, ...gl);
   const goalFree = g[0] === Math.min(nx - 1, Math.max(0, gl[0])) && g[1] === Math.min(nz - 1, Math.max(0, gl[1]));
   const end = goalFree ? { x: to.x, z: to.z } : center(g);
-  if (clearLine(G, s, g)) return [end];
+  if (clearWide(G, s, g)) return [end];
   // A*
   const N = nx * nz;
   const cost = new Float32Array(N).fill(Infinity);
@@ -201,7 +256,7 @@ export function gridPath(from, to, rects, bounds, cell = 0.2, pad = 0.14) {
       if (block[ni] || closed[ni]) continue;
       // 대각선은 양옆이 다 비어 있을 때만
       if (di && dk && (block[ck * nx + a] || block[c * nx + ci])) continue;
-      const nc = cost[cur] + w;
+      const nc = cost[cur] + w * (1 + NEAR_COST[G.near[ni]]);
       if (nc < cost[ni]) {
         cost[ni] = nc;
         prev[ni] = cur;
@@ -219,7 +274,7 @@ export function gridPath(from, to, rects, bounds, cell = 0.2, pad = 0.14) {
   let k = 1;
   while (k < cells.length) {
     let far = k;
-    while (far + 1 < cells.length && clearLine(G, a, cells[far + 1])) far++;
+    while (far + 1 < cells.length && clearWide(G, a, cells[far + 1])) far++;
     if (far === cells.length - 1) break;
     out.push(center(cells[far]));
     a = cells[far];

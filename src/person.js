@@ -105,6 +105,7 @@ function faceTexture(mood, blush, makeup = null) {
     else if (mood === 'sad') (inY = 92), (outY = 104), (mid = 98);
     else if (mood === 'pout') (inY = 104), (outY = 98), (mid = 100);
     else if (mood === 'serious') (inY = 103), (outY = 100), (mid = 101);
+    else if (mood === 'smirk') x === RX ? ((inY = 92), (outY = 94), (mid = 86)) : ((inY = 106), (outY = 104), (mid = 104));
     const xIn = x - 9 * s, xOut = x + 9 * s;
     g.beginPath();
     g.moveTo(xIn, inY);
@@ -147,6 +148,20 @@ function faceTexture(mood, blush, makeup = null) {
       g.beginPath();
       g.moveTo(x - 13, EY - 1);
       g.lineTo(x + 13, EY - 1);
+      g.stroke();
+    }
+  } else if (mood === 'smirk') {
+    // 게슴츠레 뜬 눈. 눈꺼풀이 거의 덮고 아래만 보인다
+    for (const x of [LX, RX]) {
+      g.save();
+      g.beginPath();
+      g.rect(x - 16, EY + 4, 32, 16);
+      g.clip();
+      roundEye(x + 2, 11, 14, 0);
+      g.restore();
+      g.beginPath();
+      g.moveTo(x - 14, EY + 5);
+      g.quadraticCurveTo(x, EY + 2, x + 14, EY + 5);
       g.stroke();
     }
   } else if (mood === 'blink' || mood === 'drink') {
@@ -292,6 +307,12 @@ function faceTexture(mood, blush, makeup = null) {
     g.beginPath();
     g.moveTo(116, MY - 2);
     g.lineTo(140, MY - 2);
+    g.stroke();
+  } else if (mood === 'smirk') {
+    // 한쪽 입꼬리만 올라간 비웃음
+    g.beginPath();
+    g.moveTo(112, MY);
+    g.quadraticCurveTo(128, MY + 2, 144, MY - 9);
     g.stroke();
   } else if (mood === 'sad') {
     g.beginPath();
@@ -1177,6 +1198,18 @@ export class Person {
       tgt.elL = tgt.elR = -1.9;
       tgt.lean = -0.06;
       tgt.nx = -0.15;
+    }
+    // 앉아서 팔짱 끼고 등을 젖힌 거만한 자세(회의 때 팀장)
+    if (this.idlePose === 'smug' && this.state === 'sit') {
+      tgt.slx = tgt.srx = -0.75;
+      tgt.slz = 0.25;
+      tgt.srz = -0.25;
+      tgt.twL = -Math.PI / 2;
+      tgt.twR = Math.PI / 2;
+      tgt.elL = tgt.elR = -1.9;
+      tgt.lean = -0.22;
+      tgt.nx = -0.18;
+      tgt.ny = 0.15;
     }
     // 의자에 반쯤 누운 자세. 등을 젖히고 다리를 뻗고, 한 손은 머리 뒤로 다른 손은 책상 위로
     if (this.idlePose === 'recline' && this.state === 'sit') {
